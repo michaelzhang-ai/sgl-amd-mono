@@ -148,7 +148,7 @@ jobs:
       CI_PR: ${{ needs.plan.outputs.pr }}
       CI_PR_SHA: ${{ needs.plan.outputs.pr_sha }}
       CI_BASE_SHA: ${{ needs.plan.outputs.base_sha }}
-      # The login node's local disk: the shared home is slow to write.
+      # The login node's local disk: a shared home may be slow to write.
       RESULTS: /tmp/sgl-amd-mono-ci/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       # The scripts that run outside the container come from the base branch. The

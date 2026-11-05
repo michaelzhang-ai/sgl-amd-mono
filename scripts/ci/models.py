@@ -11,9 +11,12 @@ An entry without a checkpoint on the CI nodes, or on a GPU the nodes do not
 have, still runs its unit and kernel tests; the report names what it skipped.
 """
 
-# Checkpoints on the cluster's shared NFS. A job mirrors its model's to the node's
-# local disk first (slurm_job.sh) and serves them from there, at the same paths.
-HF = "/shared_nfs/huggingface_models"
+import os
+
+# The checkpoint root on the cluster's shared storage (the runner's environment
+# sets it). A job mirrors its model's checkpoints to the node's local disk first
+# (slurm_job.sh) and serves them from there, at the same paths.
+HF = os.environ.get("CI_MODEL_ROOT", "/models")
 
 # The CI nodes' GPU.
 GPU = "mi355x"

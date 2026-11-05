@@ -13,17 +13,17 @@
 # Runner environment (its .env):
 #   SLURM_PARTITION, SLURM_ACCOUNT, SLURM_QOS
 #   SLURM_NODELIST   the one node this runner submits to (two runners, two nodes)
-#   CI_NODE_SCRATCH  node-local directory for the checkouts and the persistent cache
+#   CI_NODE_SCRATCH  node-local directory for the checkouts, model mirror and cache
+#   CI_MODEL_ROOT    the checkpoints' root on shared storage (models.py's paths)
 # Job environment (the workflow): CI_IMAGE, CI_PR, CI_PR_SHA, CI_BASE_SHA, CI_RESULTS
 #   (where to unpack the results; default $GITHUB_WORKSPACE/results/MODEL)
 # Optional: TIME_LIMIT (default 16:00:00), CI_SHARED_DIR (default ~/.sgl_amd_mono_ci),
 #           SUBMIT_ATTEMPTS (default 3)
 #
-# Spur, the cluster's Slurm-compatible scheduler, needs the handling of
-# sglang's scripts/ci/slurm/launch_amd_ci_mi35x.sh: the batch log is read back by
-# offset from shared storage, a job held before it starts is resubmitted, one
-# empty queue answer is not "finished", the time limit must be HH:MM:SS, and the
-# exit-code file may take a minute to show over NFS.
+# The cluster's Slurm-compatible scheduler needs some care: the batch log is read
+# back by offset from shared storage, a job held before it starts is resubmitted,
+# one empty queue answer is not "finished", the time limit must be HH:MM:SS, and
+# the exit-code file may take a minute to show over NFS.
 
 set -euo pipefail
 
@@ -34,6 +34,7 @@ TIER="${2:-full}"
 : "${SLURM_QOS:?set in the runner environment}"
 : "${SLURM_NODELIST:?set in the runner environment}"
 : "${CI_NODE_SCRATCH:?set in the runner environment}"
+: "${CI_MODEL_ROOT:?set in the runner environment}"
 : "${CI_IMAGE:?}" "${CI_PR_SHA:?}" "${CI_BASE_SHA:?}"
 CI_RESULTS="${CI_RESULTS:-${GITHUB_WORKSPACE:?}/results/$MODEL}"
 TIME_LIMIT="${TIME_LIMIT:-16:00:00}"

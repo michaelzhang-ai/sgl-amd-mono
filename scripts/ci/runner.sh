@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# runner.sh -- the PR test's GitHub Actions runners on a Crusoe login node.
+# runner.sh -- the PR test's GitHub Actions runners on a Slurm login node.
 #
 # Each runner instance (rN) is pinned to one MI355X CI node (SLURM_NODELIST in
 # its .env) and takes one job at a time, so two runners keep the two dedicated
 # nodes busy and never put two jobs on one node. The runner does no GPU work: it
-# checks out the repo onto the shared /home and runs sbatch/squeue
-# (slurm_launch.sh). Each instance is a systemd --user service; login-node
+# checks out the CI scripts and runs sbatch/squeue (slurm_launch.sh). Each instance is a systemd --user service; login-node
 # sessions are reaped at logout, so this needs `loginctl enable-linger`.
 #
 #   bash runner.sh install N NODE           download the runner into rN, pinned to NODE
+#                                           (needs SLURM_PARTITION, CI_NODE_SCRATCH and
+#                                           CI_MODEL_ROOT; see slurm_launch.sh)
 #   bash runner.sh register N [REPO_URL]    register rN (default https://github.com/sgl-project/sgl-amd-mono);
 #                                           reads a registration token on stdin
 #   bash runner.sh start|stop|restart N
@@ -20,25 +21,26 @@
 # /proc/<pid>/cmdline is world-readable on a shared host.
 
 set -euo pipefail
-# The login node's own disk: the shared home is slow to write, and a runner
+# The login node's own disk: a shared home may be slow to write, and a runner
 # writes its checkouts and tools under its directory.
 ROOT="${MONO_RUNNER_ROOT:-/var/tmp/sgl-amd-mono-runner-$(id -un)}"
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT=sgl-amd-mono-runner
 LABELS=sgl-amd-mono-mi355x
-PARTITION="${SLURM_PARTITION:-amd-aifw-sglang-ci}"
 
 write_env() {
   local dir=$1 node=$2
+  : "${SLURM_PARTITION:?}" "${CI_NODE_SCRATCH:?}" "${CI_MODEL_ROOT:?}"
   {
     echo "LANG=C.UTF-8"
-    echo "SLURM_PARTITION=$PARTITION"
-    echo "SLURM_ACCOUNT=${SLURM_ACCOUNT:-$PARTITION}"
-    echo "SLURM_QOS=${SLURM_QOS:-$PARTITION-qos}"
+    echo "SLURM_PARTITION=$SLURM_PARTITION"
+    echo "SLURM_ACCOUNT=${SLURM_ACCOUNT:-$SLURM_PARTITION}"
+    echo "SLURM_QOS=${SLURM_QOS:-$SLURM_PARTITION-qos}"
     echo "SLURM_NODELIST=$node"
-    echo "CI_NODE_SCRATCH=${CI_NODE_SCRATCH:-/mnt/m2m_nobackup/sgl-amd-mono-ci-$(id -un)}"
+    echo "CI_NODE_SCRATCH=$CI_NODE_SCRATCH"
+    echo "CI_MODEL_ROOT=$CI_MODEL_ROOT"
     echo "CI_SHARED_DIR=$HOME/.sgl_amd_mono_ci"
-    # The spur client config the login shell sets; a systemd service starts without it.
+    # The scheduler client config the login shell sets; a systemd service starts without it.
     env | grep -E '^SPUR_(CLUSTER_NAME|CONTROLLER_ADDR|AUTH_PLUGIN)=' || true
   } > "$dir/.env"
   echo "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" > "$dir/.path"
@@ -90,7 +92,7 @@ case "$cmd" in
     read -rs token; [[ -n "$token" ]] || { echo "no token on stdin" >&2; exit 2; }
     node=$(sed -n 's/^SLURM_NODELIST=//p' "$d/.env")
     (cd "$d" && ./config.sh --unattended --replace --url "$url" --token "$token" \
-       --name "crusoe-${node##*-}-$i" --labels "$LABELS" --work _work)
+       --name "mono-ci-${node##*-}-$i" --labels "$LABELS" --work _work)
     systemctl --user enable --now "$UNIT@$i" ;;
   start|stop|restart)
     i=$(inst "${1:?instance}")

@@ -64,8 +64,7 @@ Verified and OCRBench are not in the CI yet.
 
 ## Infrastructure
 
-- Nodes: `crsuse2-m2m-v3-060` and `crsuse2-m2m-v3-123` of the Crusoe Slurm
-  partition `amd-aifw-sglang-ci`.
+- Nodes: two MI355X nodes of a Slurm cluster, kept for this CI.
 - Runners: two, on the cluster's login node (`runner.sh`), label
   `sgl-amd-mono-mi355x`, each pinned to one node. A runner takes one job at a time,
   so the two nodes run two models at once and never two jobs on one node.
@@ -75,8 +74,8 @@ Verified and OCRBench are not in the CI yet.
   and runs `run_model.py` in it. The CI scripts come from the base branch; only
   the package and its tests come from the PR.
 - Image: the newest `rocm/sgl-dev:v*-rocm10-mi35x-YYYYMMDD`, unless the run pins one.
-- Checkpoints: under `/shared_nfs/huggingface_models` (`paths` in `models.py`). The
-  shared NFS reads too slowly to load servers from, so a job first mirrors its
+- Checkpoints: under `$CI_MODEL_ROOT` on shared storage (`paths` in `models.py`).
+  Shared storage reads too slowly to load servers from, so a job first mirrors its
   model's checkpoints to the node's local disk (once; again when the source's
   config or index changes) and the container sees the mirror at the same paths.
   `CI_STAGE_ONLY=1` makes a job only fill the mirror.

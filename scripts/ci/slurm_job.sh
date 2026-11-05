@@ -8,13 +8,14 @@
 # out/ (result.json, logs) goes back to $CI_RUN_DIR/out.tgz on shared storage.
 #
 # Environment (exported by slurm_launch.sh): CI_MODEL CI_TIER CI_HARNESS CI_REPO
-# CI_PR CI_PR_SHA CI_BASE_SHA CI_IMAGE CI_NODE_SCRATCH CI_RUN_DIR CI_EXIT_FILE
+# CI_PR CI_PR_SHA CI_BASE_SHA CI_IMAGE CI_NODE_SCRATCH CI_MODEL_ROOT CI_RUN_DIR
+# CI_EXIT_FILE
 
-exec 2>&1   # Spur's batch --output captures stdout only
+exec 2>&1   # some schedulers' batch --output captures stdout only
 set -uo pipefail
 
 : "${CI_MODEL:?}" "${CI_HARNESS:?}" "${CI_REPO:?}" "${CI_PR_SHA:?}" "${CI_BASE_SHA:?}"
-: "${CI_IMAGE:?}" "${CI_NODE_SCRATCH:?}" "${CI_RUN_DIR:?}" "${CI_EXIT_FILE:?}"
+: "${CI_IMAGE:?}" "${CI_NODE_SCRATCH:?}" "${CI_MODEL_ROOT:?}" "${CI_RUN_DIR:?}" "${CI_EXIT_FILE:?}"
 JOB_ID="${SLURM_JOB_ID:-${SPUR_JOB_ID:-$$}}"
 WS="$CI_NODE_SCRATCH/job-$JOB_ID"
 CACHE="$CI_NODE_SCRATCH/cache"
@@ -50,11 +51,11 @@ checkout() {  # DIR SHA: the commit's tree, fetched by SHA (a fork's PR head via
 mkdir -p "$WS/out" "$WS/harness/scripts" "$CACHE"
 cp -a "$CI_HARNESS" "$WS/harness/scripts/ci"
 
-# The model's checkpoints, mirrored to local disk: the shared NFS reads too slowly
+# The model's checkpoints, mirrored to local disk: shared storage reads too slowly
 # to load servers from. A mirror is redone when its source's config or index
 # changes; the container sees the mirror at the source's path.
 MIRROR="$CI_NODE_SCRATCH/models"
-mkdir -p "$MIRROR/shared_nfs"
+mkdir -p "$MIRROR$CI_MODEL_ROOT"
 mirror() {
     local src=$1 dst="$MIRROR$1" stamp
     [[ -d "$src" ]] || { echo "[mono-ci-job] no checkpoint at $src"; return 0; }
@@ -97,9 +98,9 @@ docker run -d --name "$NAME" \
     --device /dev/kfd --device /dev/dri --group-add video \
     --cap-add SYS_PTRACE --security-opt seccomp=unconfined \
     --shm-size 64g --ulimit memlock=-1 --ulimit stack=67108864 \
-    -v "$WS:/ci" -v "$CACHE:/cache" -v "$MIRROR/shared_nfs:/shared_nfs:ro" \
+    -v "$WS:/ci" -v "$CACHE:/cache" -v "$MIRROR$CI_MODEL_ROOT:$CI_MODEL_ROOT:ro" \
     -e HF_HOME=/cache/hf -e PIP_CACHE_DIR=/cache/pip \
-    -e CI_IMAGE="$CI_IMAGE" -e CI_PR_SHA="$CI_PR_SHA" -e CI_BASE_SHA="$CI_BASE_SHA" \
+    -e CI_MODEL_ROOT="$CI_MODEL_ROOT" -e CI_IMAGE="$CI_IMAGE" -e CI_PR_SHA="$CI_PR_SHA" -e CI_BASE_SHA="$CI_BASE_SHA" \
     -e MONO_CI_NUM_EXAMPLES -e MONO_CI_CONCURRENCY \
     -w /ci "$CI_IMAGE" sleep infinity
 
