@@ -53,10 +53,11 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=$ROOT/%i
-ExecStart=$ROOT/%i/run.sh
+# As the runner's own svc.sh: runsvc.sh passes the stop on to the listener, which
+# lets a running job finish its step.
+ExecStart=$ROOT/%i/bin/runsvc.sh
 Restart=always
 RestartSec=30
-# As the runner's own svc.sh: let a running job finish its step on stop.
 KillMode=process
 KillSignal=SIGTERM
 TimeoutStopSec=5min

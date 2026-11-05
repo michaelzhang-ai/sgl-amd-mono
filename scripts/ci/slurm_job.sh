@@ -63,7 +63,8 @@ mirror() {
     echo "[mono-ci-job] mirroring $src to $dst $(date -u +%FT%TZ)"
     mkdir -p "$dst"
     rm -f "$dst/.mirror"
-    rsync -a --delete --exclude .mirror "$src/" "$dst/"
+    # .cache: huggingface-cli's download metadata, not always readable by others
+    rsync -a --delete --exclude .mirror --exclude .cache "$src/" "$dst/"
     echo "$stamp" > "$dst/.mirror"
     echo "[mono-ci-job] mirrored $src $(date -u +%FT%TZ)"
 }
