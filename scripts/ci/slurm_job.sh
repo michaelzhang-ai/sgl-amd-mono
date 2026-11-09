@@ -101,7 +101,7 @@ docker run -d --name "$NAME" \
     -v "$WS:/ci" -v "$CACHE:/cache" -v "$MIRROR$CI_MODEL_ROOT:$CI_MODEL_ROOT:ro" \
     -e HF_HOME=/cache/hf -e PIP_CACHE_DIR=/cache/pip \
     -e CI_MODEL_ROOT="$CI_MODEL_ROOT" -e CI_IMAGE="$CI_IMAGE" -e CI_PR_SHA="$CI_PR_SHA" -e CI_BASE_SHA="$CI_BASE_SHA" \
-    -e MONO_CI_NUM_EXAMPLES -e MONO_CI_CONCURRENCY \
+    -e MONO_CI_NUM_EXAMPLES -e MONO_CI_CONCURRENCY -e CI_EXTRA \
     -w /ci "$CI_IMAGE" sleep infinity
 
 if [[ -s "$HF_TOKEN_FILE" ]]; then

@@ -17,6 +17,10 @@ nodes:
 
 - Add the `run-ci` label to the PR. The run removes the label when it starts, so a
   later push needs a maintainer again.
+- `run-ci-extra` runs the same and adds GPQA (or tick `extra` when running the
+  workflow by hand). GSM8K's short answers cannot show a loss at long context;
+  GPQA's long ones can. Use it for a PR that touches attention, the KV cache or
+  long sequences.
 - Or run the workflow (Actions, "PR Test (AMD)", "Run workflow") with the PR number.
   `models` runs the named models instead of the PR's scope (`common` for the unit
   and common kernel tests); `image` pins the SGLang image.
@@ -52,7 +56,7 @@ these sides:
 | --- | --- | --- | --- | --- |
 | Tests | unit, the model's kernel tests and serving tests (`test/e2e`) | same | same | same |
 | Kernel microbenchmark | the model's timing scripts, base and PR | same | main | main |
-| Accuracy | sgl-eval GSM8K (1319 questions), on and off | the serving tests' GSM8K and KL bounds | GSM8K, GPQA Diamond (and MMMU-Pro for vision models), on | the nightly's and AIME26 x4, on and off |
+| Accuracy | sgl-eval GSM8K (1319 questions), on and off; GPQA too with `run-ci-extra` | the serving tests' GSM8K and KL bounds | GSM8K, GPQA Diamond (and MMMU-Pro for vision models), on | the nightly's and AIME26 x4, on and off |
 | E2E performance | InferenceX fixed length at the model's concurrencies, base and on | the gate concurrencies only | on (against the weekly off) | off and on |
 | Scope | the server's startup lines that say which steps the launches serve | same | same | same |
 
@@ -70,9 +74,9 @@ The PR test's status fails when:
 
 - a test fails, or a serving test, benchmark or server does not finish;
 - the monokernel server logs no routing (every step ran SGLang's own path);
-- GSM8K loses significantly with the monokernels on: of the questions the on and
-  off runs answer differently, the on run gets more wrong, and an exact one-sided
-  McNemar test gives p < 0.05;
+- GSM8K (and GPQA, with `run-ci-extra`) loses significantly with the monokernels
+  on: of the questions the on and off runs answer differently, the on run gets
+  more wrong, and an exact one-sided McNemar test gives p < 0.05;
 - median TPOT is more than 2% worse than the base branch at any concurrency;
 - for a `[Perf]` or `[Feat]` PR, no gate concurrency gains 5% or more in median
   TPOT;

@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from models import (  # noqa: E402
     COMMON_KERNEL_TESTS,
     EVALS,
+    EXTRA_EVALS,
     GPU,
     ISL,
     MODELS,
@@ -510,7 +511,10 @@ class Run:
             if base_has_pkg
             else "monokernels off (new model)"
         )
-        evals = [e for e in PR_EVALS if e in self.m.get("evals", [])]
+        # CI_EXTRA: the run-ci-extra label
+        self.result["extra"] = bool(os.environ.get("CI_EXTRA"))
+        wanted = PR_EVALS + (EXTRA_EVALS if self.result["extra"] else [])
+        evals = [e for e in wanted if e in self.m.get("evals", [])]
         if a.tier != "full":
             evals = []
         if base_has_pkg:

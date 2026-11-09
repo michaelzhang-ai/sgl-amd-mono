@@ -26,6 +26,7 @@ from models import (  # noqa: E402
     ALPHA,
     BASELINE_MARGIN,
     EVALS,
+    EXTRA_EVALS,
     GAIN_TYPES,
     MODELS,
     PERF_GAIN,
@@ -75,7 +76,8 @@ def accuracy_check(key, r):
     m = MODELS.get(key, {})
     names = m.get("evals", [])
     if r.get("mode", "pr") == "pr":
-        names = [e for e in PR_EVALS if e in names]
+        wanted = PR_EVALS + (EXTRA_EVALS if r.get("extra") else [])
+        names = [e for e in wanted if e in names]
     elif r.get("mode") == "nightly":
         names = [e for e in names if not EVALS[e].get("weekly")]
     if not names:
@@ -103,7 +105,8 @@ def accuracy_check(key, r):
             parts.append(f"{name}: not run ({on['skipped']})")
             continue
         if "score" not in on:
-            states.append(FAIL if spec.get("gate") else WARN)
+            pr_gate = r.get("mode", "pr") == "pr" and name in EXTRA_EVALS
+            states.append(FAIL if spec.get("gate") or pr_gate else WARN)
             parts.append(f"{name}: monokernels on: {on.get('error', 'no result')}")
             continue
         # the nightly runs no off side: the model's fixed baseline, if it has one
@@ -126,7 +129,9 @@ def accuracy_check(key, r):
         head = f"{name}: off {off['score']:.4f} → on {on['score']:.4f}"
         if off.get("cached"):
             head += f" (off from {off.get('measured', 'an earlier run')})"
-        if spec.get("gate"):
+        # in a PR run, the run-ci-extra benchmarks gate like GSM8K
+        gate = spec.get("gate") or (r.get("mode", "pr") == "pr" and name in EXTRA_EVALS)
+        if gate:
             lost, gained, p = mcnemar(
                 off.get("per_question", {}), on.get("per_question", {})
             )

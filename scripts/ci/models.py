@@ -45,10 +45,11 @@ ISL, OSL, RANGE_RATIO, PROMPTS_PER_SLOT = 8192, 1024, 0.8, 10
 # weekly run (Saturdays) runs all of them. AIME26 x4 is the costliest (~23K tokens
 # an answer), and GPQA covers much the same ground every night.
 EVALS = {
-    "gsm8k": {"args": ["--max-tokens", "8192"], "gate": True},
-    "gpqa": {"args": ["--max-tokens", "32768"], "warn": 0.04},
+    # max tokens: room for a thinking model's whole answer
+    "gsm8k": {"args": ["--max-tokens", "16384"], "gate": True},
+    "gpqa": {"args": ["--max-tokens", "65536"], "warn": 0.04},
     "aime26": {
-        "args": ["--max-tokens", "32768", "--n-repeats", "4"],
+        "args": ["--max-tokens", "65536", "--n-repeats", "4"],
         "warn": 0.07,
         "weekly": True,
     },
@@ -56,6 +57,10 @@ EVALS = {
     "mmmu_pro": {"args": ["--max-tokens", "8192"], "warn": 0.03},
 }
 PR_EVALS = ["gsm8k"]
+# Added to a PR run by the `run-ci-extra` label: GSM8K's short answers cannot show
+# a loss at long context, GPQA's long ones can. It gates like GSM8K (paired against
+# the latest weekly off result) in a PR run, and only warns in the nightly.
+EXTRA_EVALS = ["gpqa"]
 # The nightly runs no off side. It holds each on score to the model's fixed
 # ``baseline`` ({benchmark: minimum score}): below it fails for GSM8K and warns
 # for the rest. A benchmark without one is compared with the latest weekly off

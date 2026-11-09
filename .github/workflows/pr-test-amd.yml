@@ -5,7 +5,9 @@ name: PR Test (AMD)
 # base branch, and the kernel-only timing scripts, on dedicated MI355X nodes. A run
 # takes hours, so a maintainer starts it: add the `run-ci` label (removed again when
 # the run starts, so a later push needs a maintainer again), or run this workflow
-# with a PR number. The result is the "AMD PR test" status on the PR's head commit
+# with a PR number. `run-ci-extra` runs the same and adds GPQA, which catches the
+# long-context losses GSM8K cannot (a PR that touches attention, the KV cache or
+# long sequences should get it). The result is the "AMD PR test" status on the PR's head commit
 # and a sticky PR comment; see scripts/ci/README.md.
 
 on:
@@ -22,6 +24,10 @@ on:
       image:
         description: "SGLang ROCm image (default: the newest rocm/sgl-dev v*-rocm10-mi35x-YYYYMMDD)"
         default: ""
+      extra:
+        description: "Add GPQA, as the run-ci-extra label does"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,7 +35,8 @@ permissions:
 concurrency:
   # Only runs that test: other label events must not cancel one.
   group: >-
-    ${{ (github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-ci')
+    ${{ (github.event_name == 'workflow_dispatch'
+         || github.event.label.name == 'run-ci' || github.event.label.name == 'run-ci-extra')
         && format('pr-test-amd-{0}', github.event.pull_request.number || inputs.pr)
         || github.run_id }}
   cancel-in-progress: true
@@ -39,7 +46,9 @@ env:
 
 jobs:
   plan:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-ci'
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.label.name == 'run-ci' || github.event.label.name == 'run-ci-extra'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,6 +61,7 @@ jobs:
       pr_sha: ${{ steps.pr.outputs.pr_sha }}
       base_sha: ${{ steps.pr.outputs.base_sha }}
       image: ${{ steps.image.outputs.image }}
+      extra: ${{ github.event.label.name == 'run-ci-extra' || inputs.extra || false }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,11 +91,12 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "PR #$PR head $pr_sha, base $base_ref at $base_sha: $(cat title.txt)"
 
-      - name: Remove the run-ci label
+      - name: Remove the label that started the run
         if: github.event_name == 'pull_request_target'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X DELETE "repos/${{ github.repository }}/issues/${{ steps.pr.outputs.pr }}/labels/run-ci" || true
+          LABEL: ${{ github.event.label.name }}
+        run: gh api -X DELETE "repos/${{ github.repository }}/issues/${{ steps.pr.outputs.pr }}/labels/$LABEL" || true
 
       # Read only: scope.py looks for model READMEs; nothing from the PR runs here.
       - uses: actions/checkout@v4
@@ -148,6 +159,7 @@ jobs:
       CI_PR: ${{ needs.plan.outputs.pr }}
       CI_PR_SHA: ${{ needs.plan.outputs.pr_sha }}
       CI_BASE_SHA: ${{ needs.plan.outputs.base_sha }}
+      CI_EXTRA: ${{ needs.plan.outputs.extra == 'true' && '1' || '' }}
       # The login node's local disk: a shared home may be slow to write.
       RESULTS: /tmp/sgl-amd-mono-ci/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
