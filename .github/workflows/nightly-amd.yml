@@ -1,12 +1,12 @@
 name: Nightly (AMD)
 
 # main on the newest SGLang ROCm image, each nightly model (`nightly` in
-# scripts/ci/models.py) with the monokernels on and off: its tests, its accuracy
-# benchmarks and the speed test on both sides. Sunday to Friday the nightly skips
-# the benchmarks marked `weekly` (AIME26 x4); Saturday's weekly run has them all.
-# GSM8K's on/off test gates as in the PR test; the rest only warns. The off
-# results also fill the cache the PR test reads, so a PR run scores only its own
-# side. See scripts/ci/README.md.
+# scripts/ci/models.py): its tests, accuracy benchmarks and speed test.
+# Sunday to Friday, the nightly runs the monokernels on only, skips the `weekly`
+# benchmarks (AIME26 x4) and holds the scores to each model's fixed `baseline`.
+# Saturday's weekly run has every benchmark with the monokernels on and off; its
+# off results are the reference the nightly and the PR test read until the next
+# one. See scripts/ci/README.md.
 
 on:
   schedule:
@@ -93,7 +93,7 @@ jobs:
       CI_IMAGE: ${{ needs.plan.outputs.image }}
       CI_PR_SHA: ${{ needs.plan.outputs.sha }}
       CI_BASE_SHA: ${{ needs.plan.outputs.sha }}
-      # both sides run every benchmark: allow a day
+      # the weekly run has both sides and every benchmark: allow a day
       TIME_LIMIT: "23:30:00"
       RESULTS: /tmp/sgl-amd-mono-ci/${{ github.run_id }}-${{ github.run_attempt }}
     steps:

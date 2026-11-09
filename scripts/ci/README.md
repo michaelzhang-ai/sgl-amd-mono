@@ -6,11 +6,12 @@ nodes:
 - `pr-test-amd.yml`, the **PR test**: a maintainer starts it. It gates the PR on
   its tests, GSM8K with the monokernels on and off, and speed against the base
   branch.
-- `nightly-amd.yml`, the **nightly**: every day, on main and the newest SGLang
-  ROCm image, the accuracy benchmarks and the speed test with the monokernels on
-  and off, for the models marked `nightly` in `models.py`. Sunday to Friday it
-  skips the benchmarks marked `weekly` (AIME26 x4, the costliest); Saturday's
-  **weekly** run has them all. Its off results fill the cache the PR test reads.
+- `nightly-amd.yml`, the **nightly**: Sunday to Friday, on main and the newest
+  SGLang ROCm image, the accuracy benchmarks (but the `weekly` ones: AIME26 x4,
+  the costliest) and the speed test with the monokernels on, for the models marked
+  `nightly` in `models.py`, held to each model's fixed `baseline`. Saturday's
+  **weekly** run has every benchmark with the monokernels on and off; its off
+  results are the reference the nightly and the PR test read until the next one.
 
 ## Running it
 
@@ -43,15 +44,17 @@ these sides:
 - **base**: the base branch, monokernels on (PR test only);
 - **on**: the PR (main in the nightly), monokernels on;
 - **off**: the same build, monokernels off (SGLang's own path). It does not
-  depend on the package, so its results are cached per image and recipe.
+  depend on the package, so the latest result for the model's recipe is cached:
+  the weekly run refreshes it, the PR test runs it only when the cache is empty,
+  and the nightly does not run it.
 
-| Check | PR test, full tier | PR test, smoke tier | Nightly |
-| --- | --- | --- | --- |
-| Tests | unit, the model's kernel tests and serving tests (`test/e2e`) | same | same |
-| Kernel microbenchmark | the model's timing scripts, base and PR | same | main |
-| Accuracy | sgl-eval GSM8K (1319 questions), on and off | the serving tests' GSM8K and KL bounds | GSM8K, GPQA Diamond (and MMMU-Pro for vision models), on and off; AIME26 x4 weekly |
-| E2E performance | InferenceX fixed length at the model's concurrencies, base and on | the gate concurrencies only | off and on |
-| Scope | the server's startup lines that say which steps the launches serve | same | same |
+| Check | PR test, full tier | PR test, smoke tier | Nightly | Weekly |
+| --- | --- | --- | --- | --- |
+| Tests | unit, the model's kernel tests and serving tests (`test/e2e`) | same | same | same |
+| Kernel microbenchmark | the model's timing scripts, base and PR | same | main | main |
+| Accuracy | sgl-eval GSM8K (1319 questions), on and off | the serving tests' GSM8K and KL bounds | GSM8K, GPQA Diamond (and MMMU-Pro for vision models), on | the nightly's and AIME26 x4, on and off |
+| E2E performance | InferenceX fixed length at the model's concurrencies, base and on | the gate concurrencies only | on (against the weekly off) | off and on |
+| Scope | the server's startup lines that say which steps the launches serve | same | same | same |
 
 E2E performance is `sglang.benchmark.serving`: random 8k in / 1k out, range
 ratio 0.8, 10 prompts a slot. With the monokernels on, the accuracy benchmarks
@@ -76,9 +79,14 @@ The PR test's status fails when:
 - the PR changes existing lines of `.github/CODEOWNERS` (a new model's added
   owner line is a warning for the reviewer).
 
-The nightly fails the same way on tests and GSM8K. GPQA, AIME26 and MMMU-Pro have
-too few questions to gate on: a score more than its `warn` margin below the off
-run's is a warning, as is a slowdown with the monokernels on.
+The nightly fails the same way on tests. It holds each on score to the model's
+`baseline` in `models.py`: GSM8K below it fails, the other benchmarks warn. A
+benchmark without a baseline is compared with the latest weekly off result
+instead. Each weekly report suggests baselines (the off score less the
+benchmark's margin) to copy into `models.py`. The weekly run gates on GSM8K's on
+and off test like the PR test; GPQA, AIME26 and MMMU-Pro have too few questions
+to gate on, so a score more than its `warn` margin below the off run's is a
+warning, as is a slowdown with the monokernels on.
 
 Warnings do not fail it: a model without a checkpoint on the CI nodes, a GPU the
 nodes do not have, a model whose SGLang support has not merged (`blocked`), a

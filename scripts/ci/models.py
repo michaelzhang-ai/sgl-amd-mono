@@ -56,6 +56,12 @@ EVALS = {
     "mmmu_pro": {"args": ["--max-tokens", "8192"], "warn": 0.03},
 }
 PR_EVALS = ["gsm8k"]
+# The nightly runs no off side. It holds each on score to the model's fixed
+# ``baseline`` ({benchmark: minimum score}): below it fails for GSM8K and warns
+# for the rest. A benchmark without one is compared with the latest weekly off
+# result instead. Each weekly report suggests baselines (the off score less the
+# benchmark's margin, ``BASELINE_MARGIN``) to copy into the model's entry.
+BASELINE_MARGIN = {"gsm8k": 0.015, "gpqa": 0.04, "aime26": 0.07, "mmmu_pro": 0.03}
 TEXT_EVALS = ["gsm8k", "gpqa", "aime26"]
 # One-sided significance level of the GSM8K test.
 ALPHA = 0.05
@@ -71,6 +77,8 @@ MODELS = {
         "name": "DeepSeek-V4.1-Flash",
         # Phase 1 of the nightly
         "nightly": True,
+        # set from the first weekly report
+        "baseline": {},
         "packages": ["deepseek_v41"],
         "tp": 4,
         "paths": {
@@ -130,6 +138,8 @@ MODELS = {
         "name": "GLM-5.3",
         # Phase 1 of the nightly
         "nightly": True,
+        # set from the first weekly report
+        "baseline": {},
         "packages": ["glm53"],
         "tp": 8,
         "paths": {"GLM_53_MODEL_PATH": f"{HF}/zai-org/GLM-5.3"},
@@ -148,6 +158,8 @@ MODELS = {
         "name": "GLM-5.3-Flash",
         # Phase 1 of the nightly
         "nightly": True,
+        # set from the first weekly report
+        "baseline": {},
         "packages": ["glm53_flash"],
         "tp": 4,
         # amd/GLM-5.3-Flash-Quark-MXFP4; not on the CI nodes yet
@@ -166,6 +178,8 @@ MODELS = {
         "name": "Kimi-K3",
         # Phase 1 of the nightly
         "nightly": True,
+        # set from the first weekly report
+        "baseline": {},
         "packages": ["kimi_k3"],
         "tp": 8,
         "paths": {
@@ -243,6 +257,8 @@ MODELS = {
         "name": "Qwen3.8-Flash-Next (MXFP4)",
         # Phase 1 of the nightly
         "nightly": True,
+        # set from the first weekly report
+        "baseline": {},
         "packages": ["qwen38_flash_next"],
         "tp": 1,
         # amd/Qwen3.8-Flash-Next-Quark-MXFP4-AttnFP8-PLEFP8; not on the CI nodes yet

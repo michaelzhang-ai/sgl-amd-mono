@@ -12,8 +12,8 @@ differ only in the package or in ``--enable-amd-monokernel``. Sides:
   speed test;
 * ``on``: the PR, monokernels on: the speed test and the accuracy benchmarks;
 * ``off``: the PR, monokernels off (SGLang's own path): the accuracy benchmarks.
-  It does not depend on the package, so a result for the same image and recipe
-  is cached and reused (the nightly fills the cache).
+  It does not depend on the package, so the latest result for the recipe is
+  cached and reused (the weekly run refreshes it).
 
 PR mode: base, then the unit, kernel and timing tests, on and off (GSM8K only),
 then the model's serving tests. A model new in the PR has no base package; its
@@ -21,9 +21,12 @@ off side runs the speed test as its base. The smoke tier (a model that runs only
 because shared code changed) runs no accuracy benchmark, whose bound its serving
 tests hold, and times only the gate concurrencies.
 
-Nightly mode (``--pr`` and ``--base`` both main): the tests, then on and off with
-the model's benchmarks but the weekly ones, and the speed test on both sides.
-Weekly mode: the same with every benchmark.
+Nightly mode (``--pr`` and ``--base`` both main): the tests, then the on side with
+the model's benchmarks but the weekly ones, and the speed test. It runs no off
+side: the report holds the on scores to the model's fixed ``baseline`` and shows
+the latest weekly off results. Weekly mode: on and off, every benchmark and the
+speed test on both sides; its off results are the cached reference until the next
+weekly run.
 
 Every step runs whatever an earlier one did; ``result.json`` (rewritten after each
 step) and ``logs/`` hold the outcome. ``report.py`` judges it.
@@ -379,26 +382,47 @@ class Run:
     # -- the run --------------------------------------------------------------
 
     def off_cache(self, name):
-        """The off side's cached result of benchmark ``name``: monokernels off, it
-        depends only on the image and the server recipe. None on a trial run."""
+        """The latest off-side result of benchmark ``name`` (or "perf") for this
+        model and server recipe: the weekly run writes it, the PR test and the
+        nightly read it. None on a trial run."""
         if NUM_EXAMPLES:
             return None
-        image = re.sub(r"[^A-Za-z0-9._-]", "_", self.result["image"] or "unknown")
         recipe = hashlib.sha256(json.dumps(self.recipe()).encode()).hexdigest()[:16]
-        return (
-            Path(self.args.cache) / "off" / self.key / image / f"{name}-{recipe}.json"
-        )
+        return Path(self.args.cache) / "off" / self.key / recipe / f"{name}.json"
 
-    def side(self, side, mono, perf=True, evals=()):
-        """One server: its routing lines, the speed test and the benchmarks."""
-        # the off side's cached benchmarks are not run again
-        cached = {}
-        if side == "off":
-            for name in evals:
-                path = self.off_cache(name)
-                if path and path.is_file():
-                    cached[name] = {**json.loads(path.read_text()), "cached": True}
-            self.result["accuracy"].setdefault("off", {}).update(cached)
+    def read_off_cache(self, names):
+        """Load the cached off results of ``names`` (and the off speed test) into
+        the result, each marked with the image and time it was measured on.
+        Returns the names found."""
+        found = []
+        for name in [*names, "perf"]:
+            path = self.off_cache(name)
+            if not (path and path.is_file()):
+                continue
+            got = {**json.loads(path.read_text()), "cached": True}
+            if name == "perf":
+                self.result["perf"]["off"] = got
+            else:
+                self.result["accuracy"].setdefault("off", {})[name] = got
+                found.append(name)
+        self.save()
+        return found
+
+    def write_off_cache(self, name, got):
+        path = self.off_cache(name)
+        if path and got and "error" not in got:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            stamp = {
+                "image": self.result["image"],
+                "measured": time.strftime("%Y-%m-%d"),
+            }
+            path.write_text(json.dumps({**got, **stamp}))
+
+    def side(self, side, mono, perf=True, evals=(), fresh=False):
+        """One server: its routing lines, the speed test and the benchmarks. The
+        off side reuses cached benchmarks unless ``fresh``, and caches what it runs."""
+        if side == "off" and not fresh:
+            cached = self.read_off_cache(evals)
             evals = [e for e in evals if e not in cached]
         if not (perf or evals):
             self.save()
@@ -430,10 +454,15 @@ class Run:
         if side == "off":
             for name in evals:
                 got = self.result["accuracy"]["off"].get(name, {})
-                path = self.off_cache(name)
-                if path and "score" in got:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(json.dumps(got))
+                if "score" in got:
+                    self.write_off_cache(name, got)
+            off = self.result["perf"].get("off", {})
+            if (
+                perf
+                and "error" not in off
+                and all("error" not in v for v in off.values())
+            ):
+                self.write_off_cache("perf", off)
 
     def run(self):
         a = self.args
@@ -465,7 +494,11 @@ class Run:
                     if a.mode == "weekly" or not EVALS[e].get("weekly")
                 ]
                 self.side("on", True, evals=evals)
-                self.side("off", False, evals=evals)
+                if a.mode == "weekly":
+                    # the reference the nightly and the PR test read until next week
+                    self.side("off", False, evals=evals, fresh=True)
+                else:
+                    self.read_off_cache(evals)
                 self.e2e()
             return
 

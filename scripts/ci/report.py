@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from models import (  # noqa: E402
     ALPHA,
+    BASELINE_MARGIN,
     EVALS,
     GAIN_TYPES,
     MODELS,
@@ -105,14 +106,26 @@ def accuracy_check(key, r):
             states.append(FAIL if spec.get("gate") else WARN)
             parts.append(f"{name}: monokernels on: {on.get('error', 'no result')}")
             continue
+        # the nightly runs no off side: the model's fixed baseline, if it has one
+        floor = m.get("baseline", {}).get(name)
+        if r.get("mode") == "nightly" and floor is not None:
+            low = on["score"] < floor
+            states.append((FAIL if spec.get("gate") else WARN) if low else PASS)
+            parts.append(
+                f"{name}: on {on['score']:.4f}, baseline {floor:.4f}"
+                + (" (below the baseline)" if low else "")
+            )
+            continue
         if "score" not in off:
             states.append(WARN)
-            why = off.get("error", off.get("skipped", "missing"))
-            parts.append(f"{name}: on {on['score']:.4f} (no off score: {why})")
+            why = off.get("error", off.get("skipped", "no weekly off result yet"))
+            parts.append(
+                f"{name}: on {on['score']:.4f} (no baseline or off score: {why})"
+            )
             continue
         head = f"{name}: off {off['score']:.4f} → on {on['score']:.4f}"
         if off.get("cached"):
-            head += " (off cached)"
+            head += f" (off from {off.get('measured', 'an earlier run')})"
         if spec.get("gate"):
             lost, gained, p = mcnemar(
                 off.get("per_question", {}), on.get("per_question", {})
@@ -268,6 +281,19 @@ def model_section(key, r, needs_gain):
         "|---|---|---|",
     ]
     lines += [f"| {ICON[s]} | {n} | {t} |" for n, s, t in checks]
+    if r.get("mode") == "weekly":
+        off = r.get("accuracy", {}).get("off", {})
+        floors = {
+            name: round(v["score"] - BASELINE_MARGIN.get(name, 0), 4)
+            for name, v in off.items()
+            if isinstance(v, dict) and "score" in v
+        }
+        if floors:
+            lines += [
+                "",
+                f"Suggested `baseline` for `{key}` in `models.py` (off score less the margin): "
+                f"`{json.dumps(floors)}`",
+            ]
     if rows:
         left, right = (
             ("off", "on") if r.get("mode") in ("nightly", "weekly") else ("base", "PR")
