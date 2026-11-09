@@ -1,28 +1,35 @@
-"""One model's AMD PR test, inside the SGLang ROCm container on a whole CI node.
+"""One model's AMD PR test or nightly, inside the SGLang ROCm container on a whole
+CI node.
 
-    python3 scripts/ci/run_model.py --model deepseek_v41 \\
+    python3 scripts/ci/run_model.py --mode pr --model deepseek_v41 \\
         --pr /ci/pr --base /ci/base --out /ci/out --cache /cache
 
-The base branch first, then the PR, each installed in turn over the image's
-sgl-amd-mono (editable):
+Each checkout is installed in turn over the image's sgl-amd-mono (editable), and
+every server takes the PR's recipe (``test/e2e``), so the sides of a comparison
+differ only in the package or in ``--enable-amd-monokernel``. Sides:
 
-* base: the kernel-only timing scripts, then one server (the model's recipe with
-  ``--enable-amd-monokernel``) for the speed test and, unless a result for the same
-  image and base commit is cached, the accuracy benchmarks;
-* PR: the unit tests, the model's kernel tests, the timing scripts, one server for
-  the speed test and the accuracy benchmarks, then the model's serving tests.
+* ``base``: the base branch, monokernels on (PR mode): the timing scripts and the
+  speed test;
+* ``on``: the PR, monokernels on: the speed test and the accuracy benchmarks;
+* ``off``: the PR, monokernels off (SGLang's own path): the accuracy benchmarks.
+  It does not depend on the package, so a result for the same image and recipe
+  is cached and reused (the nightly fills the cache).
 
-The smoke tier (a model that runs only because shared code changed) skips the
-accuracy benchmarks, whose bound its serving tests hold, and times only the gate
-concurrencies.
+PR mode: base, then the unit, kernel and timing tests, on and off (GSM8K only),
+then the model's serving tests. A model new in the PR has no base package; its
+off side runs the speed test as its base. The smoke tier (a model that runs only
+because shared code changed) runs no accuracy benchmark, whose bound its serving
+tests hold, and times only the gate concurrencies.
 
-Both servers take the PR's recipe, so the two sides differ only in the package. A
-model new in the PR has no base package: its base side is SGLang's own path
-(monokernels off). Every step runs whatever an earlier one did; ``result.json``
-(rewritten after each step) and ``logs/`` hold the outcome. ``report.py`` judges it.
+Nightly mode (``--pr`` and ``--base`` both main): the tests, then on and off with
+every benchmark of the model and the speed test on both sides.
+
+Every step runs whatever an earlier one did; ``result.json`` (rewritten after each
+step) and ``logs/`` hold the outcome. ``report.py`` judges it.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -45,6 +52,7 @@ from models import (  # noqa: E402
     ISL,
     MODELS,
     OSL,
+    PR_EVALS,
     PROMPTS_PER_SLOT,
     RANGE_RATIO,
 )
@@ -57,6 +65,24 @@ NUM_EXAMPLES = os.environ.get("MONO_CI_NUM_EXAMPLES")
 CONCURRENCY = os.environ.get("MONO_CI_CONCURRENCY")
 
 
+def per_question(run_dir):
+    """{question id: fraction of its repeats answered right}, from sgl-eval's
+    per-sample dumps (output-rs<repeat>.jsonl), for the paired GSM8K test."""
+    right, seen = {}, {}
+    for f in run_dir.glob("output-rs*.jsonl"):
+        for line in f.read_text(errors="replace").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            ok = row.get("symbolic_correct", row.get("is_correct"))
+            if ok is None:
+                continue
+            q = str(row["id"])
+            right[q] = right.get(q, 0) + bool(ok)
+            seen[q] = seen.get(q, 0) + 1
+    return {q: right[q] / seen[q] for q in seen}
+
+
 class Run:
     def __init__(self, args):
         self.args = args
@@ -67,6 +93,7 @@ class Run:
         self.m = MODELS.get(args.model, {})
         self.result = {
             "model": args.model,
+            "mode": args.mode,
             "tier": args.tier,
             "name": self.m.get("name", "common"),
             "image": os.environ.get("CI_IMAGE", ""),
@@ -181,6 +208,8 @@ class Run:
 
     def model_ready(self):
         """Why this model's server cannot run here, or None."""
+        if self.m.get("blocked"):
+            return self.m["blocked"]
         if GPU not in self.m.get("gpus", [GPU]):
             return f"the launches cover {', '.join(self.m['gpus'])} only; CI nodes are {GPU}"
         if not self.m.get("paths") or not ("recipe" in self.m or "args" in self.m):
@@ -286,9 +315,9 @@ class Run:
                 }
             self.save()
 
-    def evals(self, side, threads):
+    def evals(self, side, threads, names):
         res = self.result["accuracy"].setdefault(side, {})
-        for name in self.m["evals"]:
+        for name in names:
             spec = EVALS[name]
             out = self.logs / f"eval-{side}-{name}"
             cmd = (
@@ -331,6 +360,7 @@ class Run:
                         "n_repeats": d.get("n_repeats"),
                         "num_examples": d.get("num_examples"),
                         "no_answer": agg.get("no_answer"),
+                        "per_question": per_question(metrics[-1].parent),
                     }
             self.log(f"{side} {name}: {res[name]}")
             self.save()
@@ -347,28 +377,62 @@ class Run:
 
     # -- the run --------------------------------------------------------------
 
-    def baseline_cache(self):
+    def off_cache(self, name):
+        """The off side's cached result of benchmark ``name``: monokernels off, it
+        depends only on the image and the server recipe. None on a trial run."""
+        if NUM_EXAMPLES:
+            return None
         image = re.sub(r"[^A-Za-z0-9._-]", "_", self.result["image"] or "unknown")
-        base = self.result["base_sha"] or "unknown"
-        return Path(self.args.cache) / "baselines" / self.key / image / f"{base}.json"
+        recipe = hashlib.sha256(json.dumps(self.recipe()).encode()).hexdigest()[:16]
+        return (
+            Path(self.args.cache) / "off" / self.key / image / f"{name}-{recipe}.json"
+        )
 
-    def side(self, side, mono, run_evals):
+    def side(self, side, mono, perf=True, evals=()):
+        """One server: its routing lines, the speed test and the benchmarks."""
+        # the off side's cached benchmarks are not run again
+        cached = {}
+        if side == "off":
+            for name in evals:
+                path = self.off_cache(name)
+                if path and path.is_file():
+                    cached[name] = {**json.loads(path.read_text()), "cached": True}
+            self.result["accuracy"].setdefault("off", {}).update(cached)
+            evals = [e for e in evals if e not in cached]
+        if not (perf or evals):
+            self.save()
+            return
         p, model, args = self.serve(side, mono)
         if p is None:
-            self.result["perf"][side] = {"error": "server did not start"}
-            if run_evals:
-                self.result["accuracy"][side] = {"error": "server did not start"}
+            if perf:
+                self.result["perf"][side] = {"error": "server did not start"}
+            for name in evals:
+                self.result["accuracy"].setdefault(side, {})[name] = {
+                    "error": "server did not start"
+                }
             self.save()
             return
         try:
             self.routing(side)
-            self.perf(side, model)
-            if run_evals:
-                # no more requests in flight than the launches cover: wider steps
-                # take SGLang's own path, and the score would not be the kernels'
-                self.evals(side, max(self.m["gate_concurrency"], default=1))
+            if perf:
+                self.perf(side, model)
+            if evals:
+                # With the monokernels on, no more requests in flight than the
+                # launches cover: wider steps take SGLang's own path, and the score
+                # would not be the kernels'. Off, as many as the recipe runs.
+                threads = max(self.m["gate_concurrency"], default=1)
+                if not mono and "--max-running-requests" in args:
+                    threads = int(args[args.index("--max-running-requests") + 1])
+                self.evals(side, threads, evals)
         finally:
             self.stop(p)
+        if side == "off":
+            for name in evals:
+                got = self.result["accuracy"]["off"].get(name, {})
+                path = self.off_cache(name)
+                if path and "score" in got:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(json.dumps(got))
 
     def run(self):
         a = self.args
@@ -389,6 +453,17 @@ class Run:
         why = self.model_ready()
         if why:
             self.result["skipped"]["serving"] = why
+            self.skip_e2e(why)
+        if a.mode == "nightly":
+            self.install(a.pr)
+            self.tests()
+            if not why:
+                evals = self.m.get("evals", [])
+                self.side("on", True, evals=evals)
+                self.side("off", False, evals=evals)
+                self.e2e()
+            return
+
         base_has_pkg = all(
             (Path(a.base) / "sgl_amd_mono" / p).is_dir() for p in self.m["packages"]
         )
@@ -397,42 +472,35 @@ class Run:
             if base_has_pkg
             else "monokernels off (new model)"
         )
-        cache = self.baseline_cache()
-        full = a.tier == "full"
-
-        # base
+        evals = [e for e in PR_EVALS if e in self.m.get("evals", [])]
+        if a.tier != "full":
+            evals = []
         if base_has_pkg:
             self.install(a.base)
             self.microbench("base", a.base)
-        else:
-            self.install(a.pr)
-        if not why:
-            # a trial run (fewer examples) neither reads nor writes the cache
-            if NUM_EXAMPLES:
-                cache = Path(os.devnull)
-            cached = json.loads(cache.read_text()) if cache.is_file() else None
-            if cached:
-                self.result["accuracy"]["base"] = cached
-                self.result["accuracy"]["base_cached"] = str(cache)
-            self.side("base", base_has_pkg, run_evals=full and not cached)
-            got = self.result["accuracy"].get("base", {})
-            if (
-                not (cached or NUM_EXAMPLES)
-                and got
-                and all("score" in v for v in got.values())
-            ):
-                cache.parent.mkdir(parents=True, exist_ok=True)
-                cache.write_text(json.dumps(got))
-
-        # PR
+            if not why:
+                self.side("base", True)
         self.install(a.pr)
+        self.tests()
+        if not why:
+            self.side("on", True, evals=evals)
+            # a new model's speed baseline is SGLang's own path
+            self.side("off", False, perf=not base_has_pkg, evals=evals)
+            if not base_has_pkg and "off" in self.result["perf"]:
+                self.result["perf"]["base"] = self.result["perf"].pop("off")
+            self.e2e()
+
+    def tests(self):
+        """The unit, kernel and timing tests of the installed PR."""
         self.pytest("unit", ["test/unit"], 1800)
         self.pytest("kernels", self.m.get("kernel_tests", []), 2 * 3600)
-        self.microbench("pr", a.pr)
-        if not why:
-            self.side("pr", True, run_evals=full)
-            self.pytest("e2e", self.m.get("e2e_tests", []), 4 * 3600)
-        elif self.m.get("e2e_tests"):
+        self.microbench("pr", self.args.pr)
+
+    def e2e(self):
+        self.pytest("e2e", self.m.get("e2e_tests", []), 4 * 3600)
+
+    def skip_e2e(self, why):
+        if self.m.get("e2e_tests"):
             self.result["skipped"]["e2e"] = why
 
 
@@ -446,6 +514,7 @@ def main():
         "--cache", required=True, help="persistent: pip, datasets, baselines"
     )
     ap.add_argument("--tier", choices=("full", "smoke"), default="full")
+    ap.add_argument("--mode", choices=("pr", "nightly"), default="pr")
     args = ap.parse_args()
     if args.model != "common" and args.model not in MODELS:
         sys.exit(f"unknown model {args.model}")

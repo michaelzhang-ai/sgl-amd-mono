@@ -15,7 +15,8 @@
 #   SLURM_NODELIST   the one node this runner submits to (two runners, two nodes)
 #   CI_NODE_SCRATCH  node-local directory for the checkouts, model mirror and cache
 #   CI_MODEL_ROOT    the checkpoints' root on shared storage (models.py's paths)
-# Job environment (the workflow): CI_IMAGE, CI_PR, CI_PR_SHA, CI_BASE_SHA, CI_RESULTS
+# Job environment (the workflow): CI_IMAGE, CI_PR, CI_PR_SHA, CI_BASE_SHA, CI_RESULTS,
+#   CI_MODE (pr, the default, or nightly: CI_PR_SHA = CI_BASE_SHA = main)
 #   (where to unpack the results; default $GITHUB_WORKSPACE/results/MODEL)
 # Optional: TIME_LIMIT (default 16:00:00), CI_SHARED_DIR (default ~/.sgl_amd_mono_ci),
 #           SUBMIT_ATTEMPTS (default 3)
@@ -54,7 +55,7 @@ mkdir -p "$RUN_DIR"
 cp -r "$SCRIPT_DIR" "$RUN_DIR/ci"
 
 # Read by slurm_job.sh; sbatch exports the submitting environment.
-export CI_MODEL="$MODEL" CI_TIER="$TIER" CI_HARNESS="$RUN_DIR/ci" CI_RUN_DIR="$RUN_DIR"
+export CI_MODE="${CI_MODE:-pr}" CI_MODEL="$MODEL" CI_TIER="$TIER" CI_HARNESS="$RUN_DIR/ci" CI_RUN_DIR="$RUN_DIR"
 export CI_REPO="${CI_REPO:-${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-sgl-project/sgl-amd-mono}}"
 export CI_EXIT_FILE="$RUN_DIR/exit_code" CI_NODE_SCRATCH CI_PR="${CI_PR:-}"
 
