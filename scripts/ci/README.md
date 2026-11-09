@@ -7,9 +7,10 @@ nodes:
   its tests, GSM8K with the monokernels on and off, and speed against the base
   branch.
 - `nightly-amd.yml`, the **nightly**: every day, on main and the newest SGLang
-  ROCm image, every accuracy benchmark and the speed test with the monokernels on
-  and off, for the models marked `nightly` in `models.py`. Its off results fill the
-  cache the PR test reads.
+  ROCm image, the accuracy benchmarks and the speed test with the monokernels on
+  and off, for the models marked `nightly` in `models.py`. Sunday to Friday it
+  skips the benchmarks marked `weekly` (AIME26 x4, the costliest); Saturday's
+  **weekly** run has them all. Its off results fill the cache the PR test reads.
 
 ## Running it
 
@@ -48,7 +49,7 @@ these sides:
 | --- | --- | --- | --- |
 | Tests | unit, the model's kernel tests and serving tests (`test/e2e`) | same | same |
 | Kernel microbenchmark | the model's timing scripts, base and PR | same | main |
-| Accuracy | sgl-eval GSM8K (1319 questions), on and off | the serving tests' GSM8K and KL bounds | GSM8K, GPQA Diamond, AIME26 x4 (and MMMU-Pro for vision models), on and off |
+| Accuracy | sgl-eval GSM8K (1319 questions), on and off | the serving tests' GSM8K and KL bounds | GSM8K, GPQA Diamond (and MMMU-Pro for vision models), on and off; AIME26 x4 weekly |
 | E2E performance | InferenceX fixed length at the model's concurrencies, base and on | the gate concurrencies only | off and on |
 | Scope | the server's startup lines that say which steps the launches serve | same | same |
 

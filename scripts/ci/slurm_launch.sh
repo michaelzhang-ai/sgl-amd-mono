@@ -16,7 +16,7 @@
 #   CI_NODE_SCRATCH  node-local directory for the checkouts, model mirror and cache
 #   CI_MODEL_ROOT    the checkpoints' root on shared storage (models.py's paths)
 # Job environment (the workflow): CI_IMAGE, CI_PR, CI_PR_SHA, CI_BASE_SHA, CI_RESULTS,
-#   CI_MODE (pr, the default, or nightly: CI_PR_SHA = CI_BASE_SHA = main)
+#   CI_MODE (pr, the default; nightly or weekly: CI_PR_SHA = CI_BASE_SHA = main)
 #   (where to unpack the results; default $GITHUB_WORKSPACE/results/MODEL)
 # Optional: TIME_LIMIT (default 16:00:00), CI_SHARED_DIR (default ~/.sgl_amd_mono_ci),
 #           SUBMIT_ATTEMPTS (default 3)

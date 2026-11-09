@@ -22,7 +22,8 @@ because shared code changed) runs no accuracy benchmark, whose bound its serving
 tests hold, and times only the gate concurrencies.
 
 Nightly mode (``--pr`` and ``--base`` both main): the tests, then on and off with
-every benchmark of the model and the speed test on both sides.
+the model's benchmarks but the weekly ones, and the speed test on both sides.
+Weekly mode: the same with every benchmark.
 
 Every step runs whatever an earlier one did; ``result.json`` (rewritten after each
 step) and ``logs/`` hold the outcome. ``report.py`` judges it.
@@ -454,11 +455,15 @@ class Run:
         if why:
             self.result["skipped"]["serving"] = why
             self.skip_e2e(why)
-        if a.mode == "nightly":
+        if a.mode in ("nightly", "weekly"):
             self.install(a.pr)
             self.tests()
             if not why:
-                evals = self.m.get("evals", [])
+                evals = [
+                    e
+                    for e in self.m.get("evals", [])
+                    if a.mode == "weekly" or not EVALS[e].get("weekly")
+                ]
                 self.side("on", True, evals=evals)
                 self.side("off", False, evals=evals)
                 self.e2e()
@@ -514,7 +519,7 @@ def main():
         "--cache", required=True, help="persistent: pip, datasets, baselines"
     )
     ap.add_argument("--tier", choices=("full", "smoke"), default="full")
-    ap.add_argument("--mode", choices=("pr", "nightly"), default="pr")
+    ap.add_argument("--mode", choices=("pr", "nightly", "weekly"), default="pr")
     args = ap.parse_args()
     if args.model != "common" and args.model not in MODELS:
         sys.exit(f"unknown model {args.model}")

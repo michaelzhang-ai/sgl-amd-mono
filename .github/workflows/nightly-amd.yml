@@ -1,16 +1,24 @@
 name: Nightly (AMD)
 
 # main on the newest SGLang ROCm image, each nightly model (`nightly` in
-# scripts/ci/models.py) with the monokernels on and off: its tests, every accuracy
-# benchmark and the speed test on both sides. GSM8K's on/off test gates as in the
-# PR test; the rest only warns. The off results also fill the cache the PR test
-# reads, so a PR run scores only its own side. See scripts/ci/README.md.
+# scripts/ci/models.py) with the monokernels on and off: its tests, its accuracy
+# benchmarks and the speed test on both sides. Sunday to Friday the nightly skips
+# the benchmarks marked `weekly` (AIME26 x4); Saturday's weekly run has them all.
+# GSM8K's on/off test gates as in the PR test; the rest only warns. The off
+# results also fill the cache the PR test reads, so a PR run scores only its own
+# side. See scripts/ci/README.md.
 
 on:
   schedule:
-    - cron: "17 5 * * *"
+    - cron: "17 5 * * 0-5"
+    # weekly: every benchmark
+    - cron: "17 5 * * 6"
   workflow_dispatch:
     inputs:
+      weekly:
+        description: "Run every benchmark, the weekly ones too"
+        type: boolean
+        default: false
       models:
         description: "Models to run instead of the nightly set, comma-separated (see scripts/ci/models.py)"
         default: ""
@@ -30,6 +38,7 @@ jobs:
     if: github.repository == 'sgl-project/sgl-amd-mono' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
+      mode: ${{ steps.matrix.outputs.mode }}
       matrix: ${{ steps.matrix.outputs.matrix }}
       sha: ${{ steps.matrix.outputs.sha }}
       image: ${{ steps.image.outputs.image }}
@@ -42,7 +51,10 @@ jobs:
         id: matrix
         env:
           MODELS: ${{ inputs.models }}
+          WEEKLY: ${{ github.event.schedule == '17 5 * * 6' || inputs.weekly }}
         run: |
+          mode=nightly; [[ "$WEEKLY" == true ]] && mode=weekly
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
           if [[ -n "$MODELS" ]]; then
             matrix="$(jq -cn --arg m "$MODELS" '$m | split(",") | map(gsub(" "; "")) | map(select(length > 0)) | map({model: ., tier: "full"})')"
           else
@@ -69,7 +81,7 @@ jobs:
 
   test:
     needs: plan
-    name: nightly (${{ matrix.model }})
+    name: ${{ needs.plan.outputs.mode }} (${{ matrix.model }})
     runs-on: [self-hosted, sgl-amd-mono-mi355x]
     timeout-minutes: 1440
     strategy:
@@ -77,7 +89,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
-      CI_MODE: nightly
+      CI_MODE: ${{ needs.plan.outputs.mode }}
       CI_IMAGE: ${{ needs.plan.outputs.image }}
       CI_PR_SHA: ${{ needs.plan.outputs.sha }}
       CI_BASE_SHA: ${{ needs.plan.outputs.sha }}
@@ -141,6 +153,7 @@ jobs:
           for d in artifacts/mono-ci-*; do [[ -d "$d" ]] && mv "$d" "results/${d#artifacts/mono-ci-}"; done
           rc=0
           python3 harness/scripts/ci/report.py --nightly --results results \
+            --title "AMD ${{ needs.plan.outputs.mode }} (main)" \
             --run-url "$RUN_URL" --out report.md > /dev/null || rc=$?
           cat report.md >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"

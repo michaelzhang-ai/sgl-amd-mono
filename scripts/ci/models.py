@@ -41,11 +41,17 @@ ISL, OSL, RANGE_RATIO, PROMPTS_PER_SLOT = 8192, 1024, 0.8, 10
 # are compared question by question (exact McNemar test), and a significant loss
 # with the monokernels on fails. The others have too few questions to gate on;
 # a score more than ``warn`` below the off run's is a warning. A PR runs GSM8K
-# only; the nightly runs every benchmark of the model.
+# only; the nightly runs the model's benchmarks but the ``weekly`` ones, and the
+# weekly run (Saturdays) runs all of them. AIME26 x4 is the costliest (~23K tokens
+# an answer), and GPQA covers much the same ground every night.
 EVALS = {
     "gsm8k": {"args": ["--max-tokens", "8192"], "gate": True},
     "gpqa": {"args": ["--max-tokens", "32768"], "warn": 0.04},
-    "aime26": {"args": ["--max-tokens", "32768", "--n-repeats", "4"], "warn": 0.07},
+    "aime26": {
+        "args": ["--max-tokens", "32768", "--n-repeats", "4"],
+        "warn": 0.07,
+        "weekly": True,
+    },
     # vision models only
     "mmmu_pro": {"args": ["--max-tokens", "8192"], "warn": 0.03},
 }
@@ -284,7 +290,7 @@ if __name__ == "__main__":
     # `python3 models.py paths MODEL`: the checkpoints a job mirrors, one a line
     if len(sys.argv) == 3 and sys.argv[1] == "paths":
         print("\n".join(MODELS.get(sys.argv[2], {}).get("paths", {}).values()))
-    # `python3 models.py nightly`: the nightly's matrix, as JSON
+    # `python3 models.py nightly` (the weekly run's too): the nightly's matrix, as JSON
     elif sys.argv[1:] == ["nightly"]:
         import json
 

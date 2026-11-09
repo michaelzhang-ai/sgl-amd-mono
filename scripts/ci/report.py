@@ -75,6 +75,8 @@ def accuracy_check(key, r):
     names = m.get("evals", [])
     if r.get("mode", "pr") == "pr":
         names = [e for e in PR_EVALS if e in names]
+    elif r.get("mode") == "nightly":
+        names = [e for e in names if not EVALS[e].get("weekly")]
     if not names:
         return WARN, "no accuracy benchmarks for this model in CI yet"
     if r.get("skipped", {}).get("serving"):
@@ -135,7 +137,7 @@ def perf_check(key, r, needs_gain):
     """PR mode: base branch → PR, both monokernels on, with the gain/loss gate.
     Nightly: monokernels off → on, for the record."""
     m = MODELS.get(key, {})
-    nightly = r.get("mode") == "nightly"
+    nightly = r.get("mode") in ("nightly", "weekly")
     if not m.get("concurrency"):
         return WARN, "no speed test for this model in CI yet", []
     if r.get("skipped", {}).get("serving"):
@@ -236,7 +238,7 @@ def micro_check(key, r):
     bad = [x["cmd"] for x in pr if x["rc"]]
     if bad:
         return FAIL, f"failed: `{bad[0]}`"
-    if r.get("mode") == "nightly":
+    if r.get("mode") in ("nightly", "weekly"):
         sides = "main"
     else:
         sides = "base and PR" if mb.get("base") else "PR (no base package)"
@@ -267,7 +269,9 @@ def model_section(key, r, needs_gain):
     ]
     lines += [f"| {ICON[s]} | {n} | {t} |" for n, s, t in checks]
     if rows:
-        left, right = ("off", "on") if r.get("mode") == "nightly" else ("base", "PR")
+        left, right = (
+            ("off", "on") if r.get("mode") in ("nightly", "weekly") else ("base", "PR")
+        )
         lines += [
             "",
             "<details><summary>E2E performance (InferenceX fixed length: 8k/1k, range ratio 0.8)</summary>",
@@ -307,7 +311,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", required=True)
     ap.add_argument("--scope")
-    ap.add_argument("--nightly", action="store_true", help="every model in --results")
+    ap.add_argument(
+        "--nightly",
+        action="store_true",
+        help="every model in --results (nightly or weekly)",
+    )
+    ap.add_argument("--title", default="AMD nightly (main)")
     ap.add_argument("--model", help="judge one model only (its job's status)")
     ap.add_argument("--title-type", default="")
     ap.add_argument("--run-url", default="")
@@ -333,7 +342,7 @@ def main():
         overall = worst(*states)
         head = [
             MARKER,
-            f"## AMD nightly (main): {ICON[overall]} {overall}",
+            f"## {args.title}: {ICON[overall]} {overall}",
             "",
             f"Models: {', '.join(f'`{k}`' for k in keys)} · monokernels on vs off{run}",
         ]
