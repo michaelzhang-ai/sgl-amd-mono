@@ -19,6 +19,32 @@ import os
 # (slurm_job.sh) and serves them from there, at the same paths.
 HF = os.environ.get("CI_MODEL_ROOT", "/models")
 
+# Every checkpoint the library supports, by Hugging Face ID under HF, kept on the
+# CI nodes' local disk (`python3 models.py checkpoints`; a staging job with
+# CI_MODEL=all mirrors them), including the models CI cannot serve yet.
+CHECKPOINTS = [
+    f"{HF}/{repo}"
+    for repo in (
+        "deepseek-ai/DeepSeek-V4.1-Flash",
+        "deepseek-ai/DeepSeek-V4-Pro",
+        "deepseek-ai/DeepSeek-V4-Pro-DSpark",
+        "zai-org/GLM-5.3",
+        "amd/GLM-5.3-Flash-Quark-MXFP4",
+        "moonshotai/Kimi-K3",
+        "RadixArk/Kimi-K3-DSpark",
+        "moonshotai/Kimi-K3.1",
+        "RadixArk/Kimi-K3.1-DFlash2",
+        "amd/MiniMax-M3-MXFP4",
+        "Inferact/MiniMax-M3-EAGLE3-GQA",
+        "MiniMaxAI/MiniMax-M3.1-Flash",
+        "amd/MiniMax-M3.1-Flash-Quark-MXFP4",
+        "amd/Qwen3.8-Flash-Next-Quark-MXFP4-AttnFP8-PLEFP8",
+        "amd/Qwen3.8-2.4T-A95B-Quark-MXFP4",
+        "amd/Muse-Spark-Open-816B-A42B-Quark-MXFP4",
+        "RadixArk/Muse-Spark-Open-DFlash2",
+    )
+]
+
 # The CI nodes' GPU.
 GPU = "mi355x"
 
@@ -311,6 +337,9 @@ if __name__ == "__main__":
     # `python3 models.py paths MODEL`: the checkpoints a job mirrors, one a line
     if len(sys.argv) == 3 and sys.argv[1] == "paths":
         print("\n".join(MODELS.get(sys.argv[2], {}).get("paths", {}).values()))
+    # `python3 models.py checkpoints`: every supported checkpoint, one a line
+    elif sys.argv[1:] == ["checkpoints"]:
+        print("\n".join(CHECKPOINTS))
     # `python3 models.py nightly` (the weekly run's too): the nightly's matrix, as JSON
     elif sys.argv[1:] == ["nightly"]:
         import json
@@ -318,4 +347,4 @@ if __name__ == "__main__":
         keys = ["common", *(k for k, m in MODELS.items() if m.get("nightly"))]
         print(json.dumps([{"model": k, "tier": "full"} for k in keys]))
     else:
-        sys.exit("usage: models.py paths MODEL | nightly")
+        sys.exit("usage: models.py paths MODEL | checkpoints | nightly")

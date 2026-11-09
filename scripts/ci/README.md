@@ -117,7 +117,11 @@ and the reviewer verifies them. OCRBench and LiveCodeBench are not in the CI yet
   Shared storage reads too slowly to load servers from, so a job first mirrors its
   model's checkpoints to the node's local disk (once; again when the source's
   config or index changes) and the container sees the mirror at the same paths.
-  `CI_STAGE_ONLY=1` makes a job only fill the mirror.
+  `CI_STAGE_ONLY=1` makes a job only fill the mirror; with `CI_MODEL=all` it fills
+  it with every checkpoint the library supports (`CHECKPOINTS` in `models.py`). A
+  checkpoint kept elsewhere on the cluster is listed in the runner account's
+  `~/.sgl_amd_mono_ci/checkpoint_sources`, one `<path in models.py> <where it is>`
+  a line; a checkpoint on no shared storage is downloaded straight to the mirror.
 - GPQA is a gated dataset: the job fills its cache with the token in
   `~/.sgl_amd_mono_ci/hf_token` on the runner account, before any PR code runs.
 

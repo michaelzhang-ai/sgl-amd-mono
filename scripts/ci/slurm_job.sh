@@ -53,23 +53,39 @@ cp -a "$CI_HARNESS" "$WS/harness/scripts/ci"
 
 # The model's checkpoints, mirrored to local disk: shared storage reads too slowly
 # to load servers from. A mirror is redone when its source's config or index
-# changes; the container sees the mirror at the source's path.
+# changes; the container sees the mirror at the checkpoint's path (models.py's).
+# A checkpoint kept elsewhere on the cluster is named in the runner account's
+# CHECKPOINT_SOURCES file, one "<path in models.py> <where it is>" a line.
 MIRROR="$CI_NODE_SCRATCH/models"
+CHECKPOINT_SOURCES="${CHECKPOINT_SOURCES:-$HOME/.sgl_amd_mono_ci/checkpoint_sources}"
 mkdir -p "$MIRROR$CI_MODEL_ROOT"
 mirror() {
-    local src=$1 dst="$MIRROR$1" stamp
-    [[ -d "$src" ]] || { echo "[mono-ci-job] no checkpoint at $src"; return 0; }
+    local path=$1 dst="$MIRROR$1" src stamp
+    src="$(awk -v p="$path" '$1 == p {print $2; exit}' "$CHECKPOINT_SOURCES" 2>/dev/null)"
+    src="${src:-$path}"
+    if [[ ! -d "$src" ]]; then
+        # downloaded straight to the mirror, or not on the cluster
+        [[ -d "$dst" ]] || echo "[mono-ci-job] no checkpoint at $src"
+        return 0
+    fi
     stamp="$(stat -c '%n %s %Y' "$src"/config.json "$src"/*.index.json 2>/dev/null || true)"
     [[ -f "$dst/.mirror" && "$(cat "$dst/.mirror")" == "$stamp" ]] && return 0
     echo "[mono-ci-job] mirroring $src to $dst $(date -u +%FT%TZ)"
     mkdir -p "$dst"
     rm -f "$dst/.mirror"
-    # .cache: huggingface-cli's download metadata, not always readable by others
-    rsync -a --delete --exclude .mirror --exclude .cache "$src/" "$dst/"
+    # -L: a hub-cache snapshot is symlinks into its blobs. .cache: huggingface-cli's
+    # download metadata, not always readable by others
+    rsync -aL --delete --exclude .mirror --exclude .cache "$src/" "$dst/"
     echo "$stamp" > "$dst/.mirror"
     echo "[mono-ci-job] mirrored $src $(date -u +%FT%TZ)"
 }
-for path in $(python3 "$WS/harness/scripts/ci/models.py" paths "$CI_MODEL"); do
+# CI_MODEL=all with CI_STAGE_ONLY: every checkpoint the library supports
+if [[ "$CI_MODEL" == all ]]; then
+    paths="$(python3 "$WS/harness/scripts/ci/models.py" checkpoints)"
+else
+    paths="$(python3 "$WS/harness/scripts/ci/models.py" paths "$CI_MODEL")"
+fi
+for path in $paths; do
     mirror "$path"
 done
 # CI_STAGE_ONLY=1: fill the mirror and stop (staging a node ahead of the CI)
