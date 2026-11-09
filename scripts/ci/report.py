@@ -153,7 +153,9 @@ def accuracy_check(key, r):
 
 def perf_check(key, r, needs_gain):
     """PR mode: base branch → PR, both monokernels on, with the gain/loss gate.
-    Nightly: monokernels off → on, for the record."""
+    Nightly: monokernels off → on, for the record. Only median TPOT gates; output
+    throughput is shown, and a loss over PERF_LOSS at a covered concurrency warns.
+    The other serving metrics swing too much with the monokernels to judge on."""
     m = MODELS.get(key, {})
     nightly = r.get("mode") in ("nightly", "weekly")
     if not m.get("concurrency"):
@@ -168,25 +170,39 @@ def perf_check(key, r, needs_gain):
     base, new = perf.get("off" if nightly else "base", {}), perf.get("on", {})
     if "error" in new:
         return FAIL, f"monokernels on: {new['error']}", []
+    # rows: (conc, base TPOT, new TPOT, TPOT gain, base tok/s, new tok/s, note)
     rows, states, gate_gains = [], [], []
     for c in m["gate_concurrency" if r.get("tier") == "smoke" else "concurrency"]:
         p, b = new.get(str(c), {}), base.get(str(c), {})
+        bt, pt = b.get("output_throughput"), p.get("output_throughput")
         if not p.get("median_tpot_ms"):
             states.append(FAIL)
             rows.append(
-                (c, b.get("median_tpot_ms"), None, None, p.get("error", "no result"))
+                (
+                    c,
+                    b.get("median_tpot_ms"),
+                    None,
+                    None,
+                    bt,
+                    pt,
+                    p.get("error", "no result"),
+                )
             )
             continue
         if not b.get("median_tpot_ms"):
             states.append(WARN)
-            rows.append((c, None, p["median_tpot_ms"], None, "no base result"))
+            rows.append((c, None, p["median_tpot_ms"], None, bt, pt, "no base result"))
             continue
         gain = b["median_tpot_ms"] / p["median_tpot_ms"] - 1
+        note = ""
         if gain < -PERF_LOSS and (not nightly or c in m["gate_concurrency"]):
             states.append(WARN if nightly else FAIL)
         if c in m["gate_concurrency"]:
             gate_gains.append(gain)
-        rows.append((c, b["median_tpot_ms"], p["median_tpot_ms"], gain, ""))
+            if bt and pt and pt / bt - 1 < -PERF_LOSS:
+                states.append(WARN)
+                note = f"throughput {pt / bt - 1:+.1%} (warning)"
+        rows.append((c, b["median_tpot_ms"], p["median_tpot_ms"], gain, bt, pt, note))
     best = max(gate_gains, default=None)
     if needs_gain and not nightly:
         if best is None:
@@ -195,7 +211,7 @@ def perf_check(key, r, needs_gain):
             states.append(FAIL)
     summary = ", ".join(
         f"conc {c}: {b:.2f} → {p:.2f} ms ({1 + g:.2f}×)"
-        for c, b, p, g, _ in rows
+        for c, b, p, g, *_ in rows
         if g is not None
     )
     if nightly:
@@ -307,13 +323,14 @@ def model_section(key, r, needs_gain):
             "",
             "<details><summary>E2E performance (InferenceX fixed length: 8k/1k, range ratio 0.8)</summary>",
             "",
-            f"| conc | {left} TPOT (ms) | {right} TPOT (ms) | speedup | |",
-            "|---|---|---|---|---|",
+            f"| conc | {left} TPOT p50 (ms) | {right} TPOT p50 (ms) | speedup | {left} tok/s | {right} tok/s | |",
+            "|---|---|---|---|---|---|---|",
         ]
-        for c, b, p, g, note in rows:
+        for c, b, p, g, bt, pt, note in rows:
             fmt = lambda v: f"{v:.2f}" if v is not None else "–"  # noqa: E731
+            sp = f"{1 + g:.3f}×" if g is not None else "–"
             lines.append(
-                f"| {c} | {fmt(b)} | {fmt(p)} | {f'{1 + g:.3f}×' if g is not None else '–'} | {note} |"
+                f"| {c} | {fmt(b)} | {fmt(p)} | {sp} | {fmt(bt)} | {fmt(pt)} | {note} |"
             )
         lines.append("\n</details>")
     for side in ("base", "pr"):

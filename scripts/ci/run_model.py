@@ -311,9 +311,9 @@ class Run:
                 res[str(c)] = {
                     k: d.get(k)
                     for k in (
+                        # the metrics the report judges; the others swing too
+                        # much with the monokernels
                         "median_tpot_ms",
-                        "median_ttft_ms",
-                        "median_itl_ms",
                         "output_throughput",
                         "completed",
                     )

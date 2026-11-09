@@ -61,7 +61,9 @@ these sides:
 | Scope | the server's startup lines that say which steps the launches serve | same | same | same |
 
 E2E performance is `sglang.benchmark.serving`: random 8k in / 1k out, range
-ratio 0.8, 10 prompts a slot. With the monokernels on, the accuracy benchmarks
+ratio 0.8, 10 prompts a slot. The report keeps median TPOT (p50), which gates, and
+output throughput, which warns on a loss over 2% at a covered concurrency; the
+other serving metrics swing too much with the monokernels to judge on. With the monokernels on, the accuracy benchmarks
 send no more requests at once than the launches cover (`gate_concurrency`): a
 wider step takes SGLang's own path, and its score would not be the kernels'.
 
