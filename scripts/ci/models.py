@@ -1,7 +1,8 @@
-"""The models the AMD PR test runs, one entry a served model.
+"""The models the AMD PR test and nightly run, one entry a served model.
 
 A PR runs the entries whose ``packages`` it touches; a change to ``common/``,
-``sgl_amd_mono/__init__.py`` or ``pyproject.toml`` runs all of them. Each entry
+``sgl_amd_mono/__init__.py`` or ``pyproject.toml`` runs all of them. The nightly
+runs the entries marked ``nightly`` on main. Each entry
 names the server its accuracy and speed tests launch (a recipe module under
 ``test/e2e`` and its argument list, or ``env`` / ``args`` given here), the
 checkpoints on the CI nodes, its kernel and serving tests, its kernel-only
@@ -35,19 +36,23 @@ SHARED_PATHS = ("sgl_amd_mono/common/", "sgl_amd_mono/__init__.py", "pyproject.t
 # in, 1k +/- 20% out, 10 prompts a concurrency slot.
 ISL, OSL, RANGE_RATIO, PROMPTS_PER_SLOT = 8192, 1024, 0.8, 10
 
-# Accuracy: (sgl-eval benchmark, its arguments). A PR passes a benchmark when it
-# scores at least the base branch's score less the tolerance (absolute).
+# Accuracy, sgl-eval benchmarks, each scored with the monokernels on and off on
+# the same build and server recipe. GSM8K (all 1319 questions) gates: the two runs
+# are compared question by question (exact McNemar test), and a significant loss
+# with the monokernels on fails. The others have too few questions to gate on;
+# a score more than ``warn`` below the off run's is a warning. A PR runs GSM8K
+# only; the nightly runs every benchmark of the model.
 EVALS = {
-    "gsm8k": {"args": ["--max-tokens", "8192"], "tolerance": 0.015},
-    "gpqa": {"args": ["--max-tokens", "32768"], "tolerance": 0.04},
-    "aime26": {
-        "args": ["--max-tokens", "32768", "--n-repeats", "4"],
-        "tolerance": 0.07,
-    },
+    "gsm8k": {"args": ["--max-tokens", "8192"], "gate": True},
+    "gpqa": {"args": ["--max-tokens", "32768"], "warn": 0.04},
+    "aime26": {"args": ["--max-tokens", "32768", "--n-repeats", "4"], "warn": 0.07},
     # vision models only
-    "mmmu_pro": {"args": ["--max-tokens", "8192"], "tolerance": 0.03},
+    "mmmu_pro": {"args": ["--max-tokens", "8192"], "warn": 0.03},
 }
+PR_EVALS = ["gsm8k"]
 TEXT_EVALS = ["gsm8k", "gpqa", "aime26"]
+# One-sided significance level of the GSM8K test.
+ALPHA = 0.05
 
 # The speed gate. [Perf] and [Feat] PRs need a median-TPOT gain of at least
 # PERF_GAIN at one of the model's gate concurrencies; every PR fails on a loss of
@@ -58,6 +63,8 @@ GAIN_TYPES = ("Perf", "Feat")
 MODELS = {
     "deepseek_v41": {
         "name": "DeepSeek-V4.1-Flash",
+        # Phase 1 of the nightly
+        "nightly": True,
         "packages": ["deepseek_v41"],
         "tp": 4,
         "paths": {
@@ -115,6 +122,8 @@ MODELS = {
     },
     "glm53": {
         "name": "GLM-5.3",
+        # Phase 1 of the nightly
+        "nightly": True,
         "packages": ["glm53"],
         "tp": 8,
         "paths": {"GLM_53_MODEL_PATH": f"{HF}/zai-org/GLM-5.3"},
@@ -131,6 +140,8 @@ MODELS = {
     },
     "glm53_flash": {
         "name": "GLM-5.3-Flash",
+        # Phase 1 of the nightly
+        "nightly": True,
         "packages": ["glm53_flash"],
         "tp": 4,
         # amd/GLM-5.3-Flash-Quark-MXFP4; not on the CI nodes yet
@@ -147,6 +158,8 @@ MODELS = {
     },
     "kimi_k3": {
         "name": "Kimi-K3",
+        # Phase 1 of the nightly
+        "nightly": True,
         "packages": ["kimi_k3"],
         "tp": 8,
         "paths": {
@@ -186,6 +199,8 @@ MODELS = {
     },
     "minimax_m3": {
         "name": "MiniMax-M3 (MXFP4)",
+        # SGLang refuses --enable-amd-monokernel for it until both merge
+        "blocked": "needs SGLang's page16 SHUFFLE K/V (sgl-project/sglang#41998, #41708)",
         "packages": ["minimax_m3", "minimax"],
         "tp": 4,
         "paths": {
@@ -220,6 +235,8 @@ MODELS = {
     },
     "qwen38_flash_next": {
         "name": "Qwen3.8-Flash-Next (MXFP4)",
+        # Phase 1 of the nightly
+        "nightly": True,
         "packages": ["qwen38_flash_next"],
         "tp": 1,
         # amd/Qwen3.8-Flash-Next-Quark-MXFP4-AttnFP8-PLEFP8; not on the CI nodes yet
@@ -267,5 +284,11 @@ if __name__ == "__main__":
     # `python3 models.py paths MODEL`: the checkpoints a job mirrors, one a line
     if len(sys.argv) == 3 and sys.argv[1] == "paths":
         print("\n".join(MODELS.get(sys.argv[2], {}).get("paths", {}).values()))
+    # `python3 models.py nightly`: the nightly's matrix, as JSON
+    elif sys.argv[1:] == ["nightly"]:
+        import json
+
+        keys = ["common", *(k for k, m in MODELS.items() if m.get("nightly"))]
+        print(json.dumps([{"model": k, "tier": "full"} for k in keys]))
     else:
-        sys.exit("usage: models.py paths MODEL")
+        sys.exit("usage: models.py paths MODEL | nightly")

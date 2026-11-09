@@ -7,7 +7,7 @@
 # the SGLang ROCm container and runs scripts/ci/run_model.py in it. The run's
 # out/ (result.json, logs) goes back to $CI_RUN_DIR/out.tgz on shared storage.
 #
-# Environment (exported by slurm_launch.sh): CI_MODEL CI_TIER CI_HARNESS CI_REPO
+# Environment (exported by slurm_launch.sh): CI_MODEL CI_TIER CI_MODE CI_HARNESS CI_REPO
 # CI_PR CI_PR_SHA CI_BASE_SHA CI_IMAGE CI_NODE_SCRATCH CI_MODEL_ROOT CI_RUN_DIR
 # CI_EXIT_FILE
 
@@ -112,4 +112,4 @@ if [[ -s "$HF_TOKEN_FILE" ]]; then
 fi
 
 docker exec "$NAME" python3 /ci/harness/scripts/ci/run_model.py \
-    --model "$CI_MODEL" --tier "${CI_TIER:-full}" --pr /ci/pr --base /ci/base --out /ci/out --cache /cache
+    --model "$CI_MODEL" --tier "${CI_TIER:-full}" --mode "${CI_MODE:-pr}" --pr /ci/pr --base /ci/base --out /ci/out --cache /cache

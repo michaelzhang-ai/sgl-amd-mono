@@ -1,7 +1,15 @@
-# AMD PR test
+# AMD PR test and nightly
 
-`.github/workflows/pr-test-amd.yml` runs the checks of the PR review guideline on
-two dedicated MI355X nodes. A run takes hours, so a maintainer starts it.
+Two workflows run the checks of the PR review guideline on two dedicated MI355X
+nodes:
+
+- `pr-test-amd.yml`, the **PR test**: a maintainer starts it. It gates the PR on
+  its tests, GSM8K with the monokernels on and off, and speed against the base
+  branch.
+- `nightly-amd.yml`, the **nightly**: every day, on main and the newest SGLang
+  ROCm image, every accuracy benchmark and the speed test with the monokernels on
+  and off, for the models marked `nightly` in `models.py`. Its off results fill the
+  cache the PR test reads.
 
 ## Running it
 
@@ -13,11 +21,12 @@ two dedicated MI355X nodes. A run takes hours, so a maintainer starts it.
 
 The run sets the `AMD PR test` status on the PR's head commit and keeps one PR
 comment up to date with the report. Each model's logs (servers, benchmarks,
-tests) are in the run's `mono-ci-<model>` artifact.
+tests) are in the run's `mono-ci-<model>` artifact. The nightly writes its report
+to the run's summary.
 
 ## What runs
 
-`scope.py` maps the changed files to models (`models.py`):
+`scope.py` maps a PR's changed files to models (`models.py`):
 
 - a model whose own package (`sgl_amd_mono/<pkg>/`, or its tests) changed runs
   the **full** tier;
@@ -26,41 +35,56 @@ tests) are in the run's `mono-ci-<model>` artifact.
 - a PR that changes no model runs `common`: the unit tests and the common kernel
   tests.
 
-For each model, `run_model.py` installs the base branch, then the PR, over the
-image's sgl-amd-mono, and runs both with the same server (the model's recipe under
-`test/e2e`, with `--enable-amd-monokernel`):
+Every server is the model's recipe under `test/e2e`, from the PR. `run_model.py`
+installs each checkout in turn over the image's sgl-amd-mono and serves it on
+these sides:
 
-| Check | Full tier | Smoke tier |
-| --- | --- | --- |
-| Tests | unit, the model's kernel tests and serving tests (`test/e2e`) | same |
-| Kernel microbenchmark | the model's timing scripts, base and PR | same |
-| Accuracy | sgl-eval GSM8K, GPQA Diamond, AIME26 (and MMMU-Pro for vision models), base and PR | the serving tests' GSM8K and KL bounds |
-| E2E performance | InferenceX fixed length: `sglang.benchmark.serving`, random 8k in / 1k out, range ratio 0.8, 10 prompts a slot, at the model's concurrencies; base and PR on the same node, back to back | the gate concurrencies only |
-| Scope | the server's startup lines that say which steps the launches serve | same |
+- **base**: the base branch, monokernels on (PR test only);
+- **on**: the PR (main in the nightly), monokernels on;
+- **off**: the same build, monokernels off (SGLang's own path). It does not
+  depend on the package, so its results are cached per image and recipe.
 
-The base branch's accuracy is cached per model, image and base commit, so it
-runs once until either moves. A model new in the PR is compared against SGLang's
-own path (monokernels off).
+| Check | PR test, full tier | PR test, smoke tier | Nightly |
+| --- | --- | --- | --- |
+| Tests | unit, the model's kernel tests and serving tests (`test/e2e`) | same | same |
+| Kernel microbenchmark | the model's timing scripts, base and PR | same | main |
+| Accuracy | sgl-eval GSM8K (1319 questions), on and off | the serving tests' GSM8K and KL bounds | GSM8K, GPQA Diamond, AIME26 x4 (and MMMU-Pro for vision models), on and off |
+| E2E performance | InferenceX fixed length at the model's concurrencies, base and on | the gate concurrencies only | off and on |
+| Scope | the server's startup lines that say which steps the launches serve | same | same |
+
+E2E performance is `sglang.benchmark.serving`: random 8k in / 1k out, range
+ratio 0.8, 10 prompts a slot. With the monokernels on, the accuracy benchmarks
+send no more requests at once than the launches cover (`gate_concurrency`): a
+wider step takes SGLang's own path, and its score would not be the kernels'.
+
+A model new in the PR has no base package: its speed is compared against the
+off side.
 
 ## The gate
 
-The status fails when:
+The PR test's status fails when:
 
 - a test fails, or a serving test, benchmark or server does not finish;
-- the PR's server logs no monokernel routing (every step ran SGLang's own path);
-- an accuracy benchmark scores below the base branch by more than its tolerance
-  (`EVALS` in `models.py`);
+- the monokernel server logs no routing (every step ran SGLang's own path);
+- GSM8K loses significantly with the monokernels on: of the questions the on and
+  off runs answer differently, the on run gets more wrong, and an exact one-sided
+  McNemar test gives p < 0.05;
 - median TPOT is more than 2% worse than the base branch at any concurrency;
 - for a `[Perf]` or `[Feat]` PR, no gate concurrency gains 5% or more in median
   TPOT;
 - the PR changes existing lines of `.github/CODEOWNERS` (a new model's added
   owner line is a warning for the reviewer).
 
+The nightly fails the same way on tests and GSM8K. GPQA, AIME26 and MMMU-Pro have
+too few questions to gate on: a score more than its `warn` margin below the off
+run's is a warning, as is a slowdown with the monokernels on.
+
 Warnings do not fail it: a model without a checkpoint on the CI nodes, a GPU the
-nodes do not have, a benchmark the CI cannot run yet, or a model package without
-a `README.md` (Doc). Until the CI covers a check, the author runs it and gives the
-results in the PR, and the reviewer verifies them. LiveCodeBench, SWE-bench
-Verified and OCRBench are not in the CI yet.
+nodes do not have, a model whose SGLang support has not merged (`blocked`), a
+benchmark the CI cannot run yet, or a model package without a `README.md` (Doc).
+Until the CI covers a check, the author runs it and gives the results in the PR,
+and the reviewer verifies them. OCRBench and LiveCodeBench are not in the CI yet
+(sgl-eval does not run them); SWE-bench Verified stays with the author.
 
 ## Infrastructure
 
