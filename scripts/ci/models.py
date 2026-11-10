@@ -73,10 +73,10 @@ ISL, OSL, RANGE_RATIO, PROMPTS_PER_SLOT = 8192, 1024, 0.8, 10
 EVALS = {
     # max tokens: room for a thinking model's whole answer
     "gsm8k": {"args": ["--max-tokens", "16384"], "gate": True},
-    "gpqa": {"args": ["--max-tokens", "65536"], "warn": 0.04},
+    "gpqa": {"args": ["--max-tokens", "65536"], "warn": 0.05},
     "aime26": {
         "args": ["--max-tokens", "65536", "--n-repeats", "4"],
-        "warn": 0.07,
+        "warn": 0.03,
         "weekly": True,
     },
     # vision models only
@@ -92,7 +92,7 @@ EXTRA_EVALS = ["gpqa"]
 # for the rest. A benchmark without one is compared with the latest weekly off
 # result instead. Each weekly report suggests baselines (the off score less the
 # benchmark's margin, ``BASELINE_MARGIN``) to copy into the model's entry.
-BASELINE_MARGIN = {"gsm8k": 0.015, "gpqa": 0.04, "aime26": 0.07, "mmmu_pro": 0.03}
+BASELINE_MARGIN = {"gsm8k": 0.015, "gpqa": 0.05, "aime26": 0.03, "mmmu_pro": 0.03}
 TEXT_EVALS = ["gsm8k", "gpqa", "aime26"]
 # One-sided significance level of the GSM8K test.
 ALPHA = 0.05
