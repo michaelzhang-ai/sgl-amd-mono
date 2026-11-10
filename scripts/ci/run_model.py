@@ -391,12 +391,12 @@ class Run:
         recipe = hashlib.sha256(json.dumps(self.recipe()).encode()).hexdigest()[:16]
         return Path(self.args.cache) / "off" / self.key / recipe / f"{name}.json"
 
-    def read_off_cache(self, names):
-        """Load the cached off results of ``names`` (and the off speed test) into
-        the result, each marked with the image and time it was measured on.
-        Returns the names found."""
+    def read_off_cache(self, names, perf=False):
+        """Load the cached off results of ``names`` (and, with ``perf``, the off
+        speed test) into the result, each marked with the image and time it was
+        measured on. Returns the benchmark names found."""
         found = []
-        for name in [*names, "perf"]:
+        for name in [*names, *(["perf"] if perf else [])]:
             path = self.off_cache(name)
             if not (path and path.is_file()):
                 continue
@@ -457,9 +457,11 @@ class Run:
                 got = self.result["accuracy"]["off"].get(name, {})
                 if "score" in got:
                     self.write_off_cache(name, got)
+            # every measured concurrency, none failed (the dict holds only those)
             off = self.result["perf"].get("off", {})
             if (
                 perf
+                and off
                 and "error" not in off
                 and all("error" not in v for v in off.values())
             ):
@@ -499,7 +501,7 @@ class Run:
                     # the reference the nightly and the PR test read until next week
                     self.side("off", False, evals=evals, fresh=True)
                 else:
-                    self.read_off_cache(evals)
+                    self.read_off_cache(evals, perf=True)
                 self.e2e()
             return
 

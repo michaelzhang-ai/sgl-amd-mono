@@ -139,10 +139,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # GitHub caps a status description at 140 characters.
+          desc="$(jq -r '"Running: " + (.models | keys | join(", "))' scope.json | cut -c1-140)"
           gh api "repos/${{ github.repository }}/statuses/${{ steps.pr.outputs.pr_sha }}" \
             -f state=pending -f context="$STATUS_CONTEXT" \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            -f description="Running: $(jq -r '.models | keys | join(", ")' scope.json)" | cut -c1-200
+            -f description="$desc" > /dev/null
 
   test:
     needs: plan
@@ -230,8 +232,9 @@ jobs:
           python3 harness/scripts/ci/report.py --scope artifacts/scope/scope.json --results results \
             --run-url "$RUN_URL" --out report.md > /dev/null || rc=$?
           cat report.md >> "$GITHUB_STEP_SUMMARY"
-          # GitHub caps a comment at 65536 characters.
-          body="$(head -c 60000 report.md)"
+          # GitHub caps a comment at 65536 characters; cut on a character boundary.
+          # (iconv -c drops a split character but still exits 1, which bash -e would stop on)
+          body="$(head -c 60000 report.md | iconv -f utf-8 -t utf-8 -c 2>/dev/null || true)"
           (( $(wc -c < report.md) > 60000 )) && body+=$'\n\n… truncated; the full report is in the run summary.'
           id="$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
                 --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- sgl-amd-mono-ci -->"))) | .id' | tail -1)"
