@@ -355,7 +355,10 @@ class Run:
                 )
                 log = log_path.read_text(errors="replace")
             metrics = sorted(out.glob("*/metrics.json"))
-            if "gated dataset" in log or (rc and "offline mode" in log.lower()):
+            # The offline retry fails with datasets' OfflineModeIsEnabled when the
+            # token could not fill the cache: the dataset was not run, not lost.
+            offline = log.lower().replace(" ", "")
+            if "gated dataset" in log or (rc and "offlinemode" in offline):
                 res[name] = {
                     "skipped": "gated dataset: the CI needs an HF token for it"
                 }
