@@ -8,25 +8,27 @@ Each checkout is installed in turn over the image's sgl-amd-mono (editable), and
 every server takes the PR's recipe (``test/e2e``), so the sides of a comparison
 differ only in the package or in ``--enable-amd-monokernel``. Sides:
 
-* ``base``: the base branch, monokernels on (PR mode): the timing scripts and the
-  speed test;
+* ``base``: the PR's merge-base with its base branch, monokernels on (PR mode):
+  the timing scripts and the speed test;
 * ``on``: the PR, monokernels on: the speed test and the accuracy benchmarks;
 * ``off``: the PR, monokernels off (SGLang's own path): the accuracy benchmarks.
-  It does not depend on the package, so the latest result for the recipe is
-  cached and reused (the weekly run refreshes it).
+  It does not depend on the package, so the weekly run's result for the recipe
+  is kept as the monokernel-off reference (``monokernel_off_ref``) and reused
+  until the next weekly run.
 
 PR mode: base, then the unit, kernel and timing tests, on and off (GSM8K only),
-then the model's serving tests. A model new in the PR has no base package; its
-off side runs the speed test as its base. The smoke tier (a model that runs only
+then the model's serving tests. A model whose ``models.py`` entry merged before
+its package has no base package; its off side runs the speed test as its base. (A
+model new in the PR is not run at all: ``models.py`` comes from the base branch.) The smoke tier (a model that runs only
 because shared code changed) runs no accuracy benchmark, whose bound its serving
 tests hold, and times only the gate concurrencies.
 
 Nightly mode (``--pr`` and ``--base`` both main): the tests, then the on side with
 the model's benchmarks but the weekly ones, and the speed test. It runs no off
 side: the report holds the on scores to the model's fixed ``baseline`` and shows
-the latest weekly off results. Weekly mode: on and off, every benchmark and the
-speed test on both sides; its off results are the cached reference until the next
-weekly run.
+the monokernel-off reference. Weekly mode: on and off, every benchmark and the
+speed test on both sides; its off results become the monokernel-off reference
+until the next weekly run.
 
 Every step runs whatever an earlier one did; ``result.json`` (rewritten after each
 step) and ``logs/`` hold the outcome. ``report.py`` judges it.
@@ -389,27 +391,32 @@ class Run:
 
     # -- the run --------------------------------------------------------------
 
-    def off_cache(self, name):
-        """The latest off-side result of benchmark ``name`` (or "perf") for this
-        model and server recipe: the weekly run writes it, the PR test and the
-        nightly read it. A trial run (MONO_CI_NUM_EXAMPLES) keeps its own, so trial
-        and real results never mix."""
-        recipe = hashlib.sha256(json.dumps(self.recipe()).encode()).hexdigest()[:16]
-        root = Path(self.args.cache) / "off"
+    def monokernel_off_ref_path(self, name):
+        """The monokernel-off reference of benchmark ``name`` (or "perf") for this
+        model and server recipe: the latest weekly run's off-side result. The
+        weekly run writes it, the PR test and the nightly read it. None on a trial
+        run (MONO_CI_NUM_EXAMPLES): its few examples neither read nor write it."""
         if NUM_EXAMPLES:
-            root = root / f"trial-n{NUM_EXAMPLES}"
-        return root / self.key / recipe / f"{name}.json"
+            return None
+        recipe = hashlib.sha256(json.dumps(self.recipe()).encode()).hexdigest()[:16]
+        return (
+            Path(self.args.cache)
+            / "monokernel_off_ref"
+            / self.key
+            / recipe
+            / f"{name}.json"
+        )
 
-    def read_off_cache(self, names, perf=False):
-        """Load the cached off results of ``names`` (and, with ``perf``, the off
-        speed test) into the result, each marked with the image and time it was
-        measured on. Returns the benchmark names found."""
+    def read_monokernel_off_ref(self, names, perf=False):
+        """Load the monokernel-off reference of ``names`` (and, with ``perf``, of
+        the speed test) into the result as the off side, each marked with the
+        image and day it was measured on. Returns the benchmark names found."""
         found = []
         for name in [*names, *(["perf"] if perf else [])]:
-            path = self.off_cache(name)
+            path = self.monokernel_off_ref_path(name)
             if not (path and path.is_file()):
                 continue
-            got = {**json.loads(path.read_text()), "cached": True}
+            got = {**json.loads(path.read_text()), "from_monokernel_off_ref": True}
             if name == "perf":
                 self.result["perf"]["off"] = got
             else:
@@ -418,26 +425,38 @@ class Run:
         self.save()
         return found
 
-    def write_off_cache(self, name, got):
-        # Only main's weekly run writes the reference: PR code runs in this
-        # container, and a PR run must not change what other PRs compare against.
+    def write_monokernel_off_ref(self, name, got):
+        # Only a weekly run writes the reference (slurm_job.sh mounts it writable
+        # for CI_MODE=weekly only): PR code runs in this container, and a PR run
+        # must not change what other PRs compare against.
         if self.args.mode != "weekly":
             return
-        path = self.off_cache(name)
+        path = self.monokernel_off_ref_path(name)
         if path and got and "error" not in got:
             path.parent.mkdir(parents=True, exist_ok=True)
             stamp = {
                 "image": self.result["image"],
                 "measured": time.strftime("%Y-%m-%d"),
             }
-            path.write_text(json.dumps({**got, **stamp}))
+            # write then rename: a job on the other node may be reading it
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({**got, **stamp}))
+            os.replace(tmp, path)
+            # The container writes as root; give the files to the shared
+            # directory's owner (the runner account), so it can clean them up.
+            top = Path(self.args.cache) / "monokernel_off_ref"
+            owner = top.stat()
+            rel = path.relative_to(top)
+            for p in [rel, *rel.parents][:-1]:  # the file and its new dirs, not "."
+                os.chown(top / p, owner.st_uid, owner.st_gid)
 
     def side(self, side, mono, perf=True, evals=(), fresh=False):
         """One server: its routing lines, the speed test and the benchmarks. The
-        off side reuses cached benchmarks unless ``fresh``, and caches what it runs."""
+        off side reuses the monokernel-off reference unless ``fresh``, and (in the
+        weekly run) makes what it measures the new reference."""
         if side == "off" and not fresh:
-            cached = self.read_off_cache(evals)
-            evals = [e for e in evals if e not in cached]
+            found = self.read_monokernel_off_ref(evals)
+            evals = [e for e in evals if e not in found]
         if not (perf or evals):
             self.save()
             return
@@ -469,7 +488,7 @@ class Run:
             for name in evals:
                 got = self.result["accuracy"]["off"].get(name, {})
                 if "score" in got:
-                    self.write_off_cache(name, got)
+                    self.write_monokernel_off_ref(name, got)
             # every measured concurrency, none failed (the dict holds only those)
             off = self.result["perf"].get("off", {})
             if (
@@ -478,7 +497,7 @@ class Run:
                 and "error" not in off
                 and all("error" not in v for v in off.values())
             ):
-                self.write_off_cache("perf", off)
+                self.write_monokernel_off_ref("perf", off)
 
     def run(self):
         a = self.args
@@ -517,7 +536,7 @@ class Run:
                     # the reference the nightly and the PR test read until next week
                     self.step("off", self.side, "off", False, evals=evals, fresh=True)
                 else:
-                    self.step("off", self.read_off_cache, evals, perf=True)
+                    self.step("off", self.read_monokernel_off_ref, evals, perf=True)
                 self.step("e2e", self.e2e)
             return
 
@@ -654,7 +673,9 @@ def main():
     ap.add_argument("--base", required=True, help="the base branch's checkout")
     ap.add_argument("--out", required=True)
     ap.add_argument(
-        "--cache", required=True, help="persistent: pip, datasets, baselines"
+        "--cache",
+        required=True,
+        help="persistent: pip, datasets, the monokernel-off reference",
     )
     ap.add_argument("--tier", choices=("full", "smoke"), default="full")
     ap.add_argument("--mode", choices=("pr", "nightly", "weekly"), default="pr")

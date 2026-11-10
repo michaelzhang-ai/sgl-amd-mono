@@ -121,14 +121,19 @@ def accuracy_check(key, r):
             continue
         if "score" not in off:
             states.append(WARN)
-            why = off.get("error", off.get("skipped", "no weekly off result yet"))
+            why = off.get(
+                "error", off.get("skipped", "no monokernel-off reference yet")
+            )
             parts.append(
                 f"{name}: on {on['score']:.4f} (no baseline or off score: {why})"
             )
             continue
         head = f"{name}: off {off['score']:.4f} → on {on['score']:.4f}"
-        if off.get("cached"):
-            head += f" (off from {off.get('measured', 'an earlier run')})"
+        if off.get("from_monokernel_off_ref"):
+            head += (
+                f" (off: the monokernel-off reference of"
+                f" {off.get('measured', 'an earlier weekly run')})"
+            )
         # in a PR run, the run-ci-extra benchmarks gate like GSM8K
         gate = spec.get("gate") or (r.get("mode", "pr") == "pr" and name in EXTRA_EVALS)
         if gate:
@@ -152,7 +157,8 @@ def accuracy_check(key, r):
 
 
 def perf_check(key, r, needs_gain):
-    """PR mode: base branch → PR, both monokernels on, with the gain/loss gate.
+    """PR mode: base side (the PR's merge-base) → PR, both monokernels on, with
+    the loss gate.
     Nightly: monokernels off → on, for the record. Only median TPOT gates: a loss
     over PERF_LOSS at a covered concurrency (``gate_concurrency``) fails a PR, at
     the others it warns. The [Perf]/[Feat] gain is judged across all the PR's

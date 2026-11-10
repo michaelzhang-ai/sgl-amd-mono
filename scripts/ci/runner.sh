@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# runner.sh -- the PR test's GitHub Actions runners on a Slurm login node.
+# runner.sh -- the PR test's GitHub Actions runners on a cluster host that can
+# submit Slurm jobs (a login node or a runner VM).
 #
 # Each runner instance (rN) takes one job at a time, and slurm_launch.sh submits
 # it as a whole-node job to whichever of the two dedicated nodes is free, so two
 # runners keep both nodes busy and never put two jobs on one node. The runner
-# does no GPU work: it checks out the CI scripts and runs sbatch/squeue (slurm_launch.sh). Each instance is a systemd --user service; login-node
-# sessions are reaped at logout, so this needs `loginctl enable-linger`.
+# does no GPU work: it checks out the CI scripts and runs sbatch/squeue
+# (slurm_launch.sh). Each instance is a systemd --user service; the host reaps a
+# user's sessions at logout, so this needs `loginctl enable-linger`.
 #
 #   bash runner.sh install N                download the runner into rN and write its .env
 #                                           (needs SLURM_PARTITION, CI_NODE_SCRATCH and
@@ -21,7 +23,7 @@
 # /proc/<pid>/cmdline is world-readable on a shared host.
 
 set -euo pipefail
-# The login node's own disk: a shared home may be slow to write, and a runner
+# The host's own disk: a shared home may be slow to write, and a runner
 # writes its checkouts and tools under its directory.
 ROOT="${MONO_RUNNER_ROOT:-/var/tmp/sgl-amd-mono-runner-$(id -un)}"
 UNIT_DIR="$HOME/.config/systemd/user"
@@ -111,5 +113,5 @@ case "$cmd" in
       printf '%-4s registered=%-60s service=%s\n' "$i" \
         "$reg" "$(systemctl --user is-active "$UNIT@$i" 2>/dev/null)"
     done ;;
-  *) sed -n '2,22p' "$0"; exit 1 ;;
+  *) sed -n '2,23p' "$0"; exit 1 ;;
 esac

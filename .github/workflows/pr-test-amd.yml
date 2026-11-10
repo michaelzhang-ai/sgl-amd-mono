@@ -152,7 +152,8 @@ jobs:
   test:
     needs: plan
     name: test (${{ matrix.model }}, ${{ matrix.tier }})
-    # Two runners on the cluster's login node; each job takes one of the two CI nodes.
+    # Two runners on a cluster host that submits Slurm jobs (scripts/ci/runner.sh);
+    # each job takes one of the two CI nodes.
     runs-on: [self-hosted, sgl-amd-mono-mi355x]
     timeout-minutes: 1200
     strategy:
@@ -165,7 +166,7 @@ jobs:
       CI_PR_SHA: ${{ needs.plan.outputs.pr_sha }}
       CI_BASE_SHA: ${{ needs.plan.outputs.base_sha }}
       CI_EXTRA: ${{ needs.plan.outputs.extra == 'true' && '1' || '' }}
-      # The login node's local disk: a shared home may be slow to write.
+      # The runner host's local disk: a shared home may be slow to write.
       RESULTS: /tmp/sgl-amd-mono-ci/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       # The scripts that run outside the container come from the base branch. The
