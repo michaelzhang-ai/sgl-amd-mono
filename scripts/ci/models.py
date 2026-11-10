@@ -22,6 +22,7 @@ HF = os.environ.get("CI_MODEL_ROOT", "/models")
 # Every checkpoint the library supports, by Hugging Face ID under HF, kept on the
 # CI nodes' local disk (`python3 models.py checkpoints`; a staging job with
 # CI_MODEL=all mirrors them), including the models CI cannot serve yet.
+# moonshotai/Kimi-K3.1 is on neither Hugging Face nor the cluster yet.
 CHECKPOINTS = [
     f"{HF}/{repo}"
     for repo in (
@@ -67,7 +68,7 @@ ISL, OSL, RANGE_RATIO, PROMPTS_PER_SLOT = 8192, 1024, 0.8, 10
 # are compared question by question (exact McNemar test), and a significant loss
 # with the monokernels on fails. The others have too few questions to gate on;
 # a score more than ``warn`` below the off run's is a warning. A PR runs GSM8K
-# only; the nightly runs the model's benchmarks but the ``weekly`` ones, and the
+# (and GPQA with the `run-ci-extra` label); the nightly runs the model's benchmarks but the ``weekly`` ones, and the
 # weekly run (Saturdays) runs all of them. AIME26 x4 is the costliest (~23K tokens
 # an answer), and GPQA covers much the same ground every night.
 EVALS = {
@@ -91,16 +92,18 @@ EXTRA_EVALS = ["gpqa"]
 # The nightly runs no off side. It holds each on score to the model's fixed
 # ``baseline`` ({benchmark: minimum score}): below it fails for GSM8K and warns
 # for the rest. A benchmark without one is compared with the monokernel-off
-# reference (the latest weekly run's off result) instead. Each weekly report suggests baselines (the off score less the
-# benchmark's margin, ``BASELINE_MARGIN``) to copy into the model's entry.
+# reference (the latest weekly run's off result) instead. Each weekly report
+# suggests baselines (the off score less the benchmark's margin,
+# ``BASELINE_MARGIN``) to copy into the model's entry.
 BASELINE_MARGIN = {"gsm8k": 0.015, "gpqa": 0.05, "aime26": 0.03, "mmmu_pro": 0.03}
 TEXT_EVALS = ["gsm8k", "gpqa", "aime26"]
 # One-sided significance level of the GSM8K test.
 ALPHA = 0.05
 
-# The speed gate. [Perf] and [Feat] PRs need a median-TPOT gain of at least
-# PERF_GAIN at one of the model's gate concurrencies; every PR fails on a loss of
-# more than PERF_LOSS at any measured concurrency.
+# The speed gate, base side (the PR's merge-base) to PR. Every PR fails on a
+# median-TPOT loss of more than PERF_LOSS at a gate (covered) concurrency; at the
+# other measured concurrencies such a loss warns. A [Perf] or [Feat] PR also needs
+# a gain of at least PERF_GAIN at a gate concurrency of one of its models.
 PERF_GAIN, PERF_LOSS = 0.05, 0.02
 GAIN_TYPES = ("Perf", "Feat")
 
@@ -194,7 +197,8 @@ MODELS = {
         "baseline": {},
         "packages": ["glm53_flash"],
         "tp": 4,
-        # amd/GLM-5.3-Flash-Quark-MXFP4; not on the CI nodes yet
+        # amd/GLM-5.3-Flash-Quark-MXFP4: not on shared storage; downloaded by hand
+        # into both nodes' mirror
         "paths": {"GLM_53_FLASH_MODEL_PATH": f"{HF}/amd/GLM-5.3-Flash-Quark-MXFP4"},
         "recipe": ("glm53_flash_server", "ARGS"),
         "kernel_tests": ["test/kernels/test_glm53_flash_kernels.py"],
@@ -293,7 +297,8 @@ MODELS = {
         "baseline": {},
         "packages": ["qwen38_flash_next"],
         "tp": 1,
-        # amd/Qwen3.8-Flash-Next-Quark-MXFP4-AttnFP8-PLEFP8; not on the CI nodes yet
+        # amd/Qwen3.8-Flash-Next-Quark-MXFP4-AttnFP8-PLEFP8: not on shared storage;
+        # downloaded by hand into both nodes' mirror
         "paths": {
             "QWEN38_FLASH_NEXT_MODEL_PATH": f"{HF}/amd/Qwen3.8-Flash-Next-Quark-MXFP4-AttnFP8-PLEFP8"
         },

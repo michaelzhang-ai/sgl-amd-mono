@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run one model's PR test as a whole-node Slurm job on one of the CI's two nodes.
 #
-# The GitHub runner lives on the cluster's login node and does no GPU work. This
+# The GitHub runner lives on a cluster host that can submit Slurm jobs (a login node
+# or a runner VM) and does no GPU work. This
 # script submits slurm_job.sh to whichever of the two nodes is free, streams the
 # job's log into the step output, unpacks the job's out/ into $CI_RESULTS, and
 # exits non-zero only when the job itself failed to run (the test outcome is in
@@ -14,9 +15,10 @@
 #   SLURM_PARTITION, SLURM_ACCOUNT, SLURM_QOS
 #   CI_NODE_SCRATCH  node-local directory for the checkouts, model mirror and cache
 #   CI_MODEL_ROOT    the checkpoints' root on shared storage (models.py's paths)
-# Job environment (the workflow): CI_IMAGE, CI_PR, CI_PR_SHA, CI_BASE_SHA, CI_RESULTS,
-#   CI_MODE (pr, the default; nightly or weekly: CI_PR_SHA = CI_BASE_SHA = main)
-#   (where to unpack the results; default $GITHUB_WORKSPACE/results/MODEL)
+# Job environment (the workflow): CI_IMAGE, CI_PR, CI_PR_SHA, CI_BASE_SHA (the PR's
+#   merge-base), CI_RESULTS (where to unpack the results; default
+#   $GITHUB_WORKSPACE/results/MODEL), CI_MODE (pr, the default; nightly or weekly:
+#   CI_PR_SHA = CI_BASE_SHA = main)
 # Optional: TIME_LIMIT (default 16:00:00), CI_SHARED_DIR (default ~/.sgl_amd_mono_ci),
 #           SUBMIT_ATTEMPTS (default 3)
 #

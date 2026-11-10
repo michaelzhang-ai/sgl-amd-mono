@@ -8,8 +8,8 @@ Each checkout is installed in turn over the image's sgl-amd-mono (editable), and
 every server takes the PR's recipe (``test/e2e``), so the sides of a comparison
 differ only in the package or in ``--enable-amd-monokernel``. Sides:
 
-* ``base``: the base branch, monokernels on (PR mode): the timing scripts and the
-  speed test;
+* ``base``: the PR's merge-base with its base branch, monokernels on (PR mode):
+  the timing scripts and the speed test;
 * ``on``: the PR, monokernels on: the speed test and the accuracy benchmarks;
 * ``off``: the PR, monokernels off (SGLang's own path): the accuracy benchmarks.
   It does not depend on the package, so the weekly run's result for the recipe
@@ -17,8 +17,9 @@ differ only in the package or in ``--enable-amd-monokernel``. Sides:
   until the next weekly run.
 
 PR mode: base, then the unit, kernel and timing tests, on and off (GSM8K only),
-then the model's serving tests. A model new in the PR has no base package; its
-off side runs the speed test as its base. The smoke tier (a model that runs only
+then the model's serving tests. A model whose ``models.py`` entry merged before
+its package has no base package; its off side runs the speed test as its base. (A
+model new in the PR is not run at all: ``models.py`` comes from the base branch.) The smoke tier (a model that runs only
 because shared code changed) runs no accuracy benchmark, whose bound its serving
 tests hold, and times only the gate concurrencies.
 
@@ -425,8 +426,9 @@ class Run:
         return found
 
     def write_monokernel_off_ref(self, name, got):
-        # Only main's weekly run writes the reference: PR code runs in this
-        # container, and a PR run must not change what other PRs compare against.
+        # Only a weekly run writes the reference (slurm_job.sh mounts it writable
+        # for CI_MODE=weekly only): PR code runs in this container, and a PR run
+        # must not change what other PRs compare against.
         if self.args.mode != "weekly":
             return
         path = self.monokernel_off_ref_path(name)

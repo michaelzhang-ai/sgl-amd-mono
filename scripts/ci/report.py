@@ -157,7 +157,8 @@ def accuracy_check(key, r):
 
 
 def perf_check(key, r, needs_gain):
-    """PR mode: base branch → PR, both monokernels on, with the gain/loss gate.
+    """PR mode: base side (the PR's merge-base) → PR, both monokernels on, with
+    the loss gate.
     Nightly: monokernels off → on, for the record. Only median TPOT gates: a loss
     over PERF_LOSS at a covered concurrency (``gate_concurrency``) fails a PR, at
     the others it warns. The [Perf]/[Feat] gain is judged across all the PR's

@@ -27,7 +27,8 @@ HF_TOKEN_FILE="${HF_TOKEN_FILE:-$HOME/.sgl_amd_mono_ci/hf_token}"
 # and the nightly compare against (run_model.py, /cache/monokernel_off_ref). On
 # shared storage, since the weekly run that writes it and the jobs that read it can
 # land on either node. The container mounts it directly (the shared home does not
-# squash root): writable in main's weekly run only, read-only wherever PR code runs.
+# squash root): writable in a weekly run only (CI_MODE=weekly, the nightly workflow's
+# Saturday or `weekly` run), read-only in the PR test and the nightly.
 MONOKERNEL_OFF_REF_SHARED="${CI_SHARED_DIR:-$HOME/.sgl_amd_mono_ci}/monokernel_off_ref"
 MONOKERNEL_OFF_REF_MOUNT=ro
 [[ "${CI_MODE:-pr}" == weekly ]] && MONOKERNEL_OFF_REF_MOUNT=rw

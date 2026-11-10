@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       weekly:
-        description: "Run every benchmark, the weekly ones too"
+        description: "Weekly run: every benchmark, on and off; also rewrites the shared monokernel-off reference, so tick it on main only"
         type: boolean
         default: false
       models:
