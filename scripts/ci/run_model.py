@@ -392,11 +392,13 @@ class Run:
     def off_cache(self, name):
         """The latest off-side result of benchmark ``name`` (or "perf") for this
         model and server recipe: the weekly run writes it, the PR test and the
-        nightly read it. None on a trial run."""
-        if NUM_EXAMPLES:
-            return None
+        nightly read it. A trial run (MONO_CI_NUM_EXAMPLES) keeps its own, so trial
+        and real results never mix."""
         recipe = hashlib.sha256(json.dumps(self.recipe()).encode()).hexdigest()[:16]
-        return Path(self.args.cache) / "off" / self.key / recipe / f"{name}.json"
+        root = Path(self.args.cache) / "off"
+        if NUM_EXAMPLES:
+            root = root / f"trial-n{NUM_EXAMPLES}"
+        return root / self.key / recipe / f"{name}.json"
 
     def read_off_cache(self, names, perf=False):
         """Load the cached off results of ``names`` (and, with ``perf``, the off

@@ -33,8 +33,15 @@ finish() {
     local rc=$?
     tar czf "$CI_RUN_DIR/out.tgz" -C "$WS/out" . 2>/dev/null || true
     # The off-side results main's weekly run measured, back to shared storage (as this
-    # user). A PR run never writes them: its code ran in the container.
-    [[ "${CI_MODE:-pr}" == weekly && -d "$WS/off" ]]         && cp -r --preserve=timestamps "$WS/off/." "$OFF_SHARED/" 2>/dev/null || true
+    # user). A PR run never writes them: its code ran in the container. Only this
+    # model's files go back (the other model of a weekly run may have written fresher
+    # ones since this job's copy), each to a temporary name and then renamed.
+    if [[ "${CI_MODE:-pr}" == weekly ]]; then
+        find "$WS/off" -type d -name "$CI_MODEL" -prune 2>/dev/null | while read -r d; do
+            rel="${d#"$WS/off/"}"
+            mkdir -p "$OFF_SHARED/$rel" && rsync -rt --delay-updates "$d/" "$OFF_SHARED/$rel/" 2>/dev/null || true
+        done
+    fi
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     # The container wrote as root; remove its files from inside one (never pulling).
     { docker image inspect "$CI_IMAGE" >/dev/null 2>&1 \
