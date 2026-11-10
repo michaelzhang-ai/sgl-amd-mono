@@ -85,6 +85,13 @@ The PR test's status fails when:
 - the PR changes existing lines of `.github/CODEOWNERS` (a new model's added
   owner line is a warning for the reviewer).
 
+Before the nightly or weekly run installs main, it checks the sgl-amd-mono the
+SGLang image pins (`/sgl-workspace/sgl-amd-mono`, the commit SGLang's
+`rocm.Dockerfile` installs): its `test/unit/test_contract.py`, and for each model
+the pinned commit serves, a server with the monokernels on answering a few
+requests. A change in SGLang that the pinned commit does not follow, such as a
+field added to an op, fails that check the day the image picks it up.
+
 The nightly fails the same way on tests. It holds each on score to the model's
 `baseline` in `models.py`: GSM8K below it fails, the other benchmarks warn. A
 benchmark without a baseline is compared with the latest weekly off result

@@ -279,6 +279,25 @@ def micro_check(key, r):
     return PASS, f"{len(pr)} script(s) on {sides}; output below"
 
 
+def pinned_check(r):
+    """Nightly and weekly: the sgl-amd-mono the SGLang image pins, on that image."""
+    p = r.get("pinned", {})
+    if "skipped" in p:
+        return WARN, p["skipped"]
+    if not p:
+        return FAIL, "did not run"
+    parts = [
+        f"`{p.get('commit') or '?'}`",
+        f"contract test {p.get('contract', 'did not run')}",
+    ]
+    if "serve" in p:
+        parts.append(f"served steps {p['serve']}")
+    bad = str(p.get("contract", "")).startswith("fail") or str(
+        p.get("serve", "")
+    ).startswith("fail")
+    return (FAIL if bad else PASS), " · ".join(parts)
+
+
 def model_section(key, r, needs_gain):
     checks = [("Scope", *scope_check(key, r))] if key != "common" else []
     if key != "common":
@@ -291,6 +310,8 @@ def model_section(key, r, needs_gain):
     else:
         rows = []
     checks.append(("Tests", *tests_check(key, r)))
+    if r.get("mode") in ("nightly", "weekly"):
+        checks.append(("Pinned sgl-amd-mono on this SGLang", *pinned_check(r)))
     if r.get("error"):
         checks.append(("Run", FAIL, f"`{r['error']}`"))
     lines = [

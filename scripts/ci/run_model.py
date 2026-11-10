@@ -67,6 +67,10 @@ LAUNCH_TIMEOUT = 3600
 SGL_EVAL = "sgl-eval==0.1.3"
 # Trial runs of the CI itself: fewer examples a benchmark, other concurrencies.
 NUM_EXAMPLES = os.environ.get("MONO_CI_NUM_EXAMPLES")
+# The sgl-amd-mono SGLang's ROCm image installs (docker/rocm.Dockerfile: the
+# commit SGLang pins), and the requests the nightly sends a server on it.
+PINNED_SRC = "/sgl-workspace/sgl-amd-mono"
+PINNED_REQUESTS = 8
 CONCURRENCY = os.environ.get("MONO_CI_CONCURRENCY")
 
 
@@ -478,12 +482,15 @@ class Run:
             capture_output=True,
             text=True,
         ).stdout.strip()
+        why = self.model_ready() if self.key != "common" else None
+        if a.mode in ("nightly", "weekly"):
+            # first the sgl-amd-mono the image pins: what a user of this SGLang runs
+            self.pinned(serve=self.key != "common" and not why)
         if self.key == "common":
             self.install(a.pr)
             self.pytest("unit", ["test/unit"], 1800)
             self.pytest("kernels", COMMON_KERNEL_TESTS, 3600)
             return
-        why = self.model_ready()
         if why:
             self.result["skipped"]["serving"] = why
             self.skip_e2e(why)
@@ -533,6 +540,73 @@ class Run:
             if not base_has_pkg and "off" in self.result["perf"]:
                 self.result["perf"]["base"] = self.result["perf"].pop("off")
             self.e2e()
+
+    def pinned(self, serve):
+        """The nightly's first step: the image's own sgl-amd-mono, the commit this
+        SGLang pins, before main replaces it. SGLang can add a field to an op that
+        the pinned commit does not set; the contract test (every SGLang name the
+        package reads) and a served step with the monokernels on catch it the day
+        the image changes."""
+        src = Path(PINNED_SRC)
+        res = self.result["pinned"] = {}
+        if not (src / "sgl_amd_mono").is_dir():
+            res["skipped"] = f"no sgl-amd-mono in the image ({src})"
+            self.save()
+            return
+        res["commit"] = subprocess.run(
+            ["git", "-C", str(src), "log", "-1", "--format=%h %cs %s"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        os.environ["SGLANG_AMD_MONO_CACHE_DIR"] = "/tmp/sgl-amd-mono-cache-pinned"
+        xml = self.logs / "pinned-contract.xml"
+        rc = self.sh(
+            f"python3 -m pytest -v -rA --junitxml={xml} test/unit/test_contract.py",
+            "pinned-contract",
+            cwd=str(src),
+            timeout=1800,
+        )
+        res["contract"] = "pass" if rc == 0 else f"fail (exit {rc})"
+        if serve and not all(
+            (src / "sgl_amd_mono" / p).is_dir() for p in self.m["packages"]
+        ):
+            res["serve"] = "skipped: the pinned commit predates this model"
+            serve = False
+        if serve:
+            p, model, _ = self.serve("pinned", mono=True)
+            if p is None:
+                res["serve"] = "fail: the server did not start"
+            else:
+                try:
+                    self.routing("pinned")
+                    bad = []
+                    for i in range(PINNED_REQUESTS):
+                        try:
+                            r = requests.post(
+                                f"http://127.0.0.1:{PORT}/generate",
+                                json={
+                                    "text": f"Question {i}: what is {i + 17} * 3? Answer:",
+                                    "sampling_params": {
+                                        "max_new_tokens": 64,
+                                        "temperature": 0,
+                                    },
+                                },
+                                timeout=600,
+                            )
+                            if not (r.ok and r.json().get("text")):
+                                bad.append(f"request {i}: HTTP {r.status_code}")
+                        except requests.RequestException as e:
+                            bad.append(f"request {i}: {type(e).__name__}")
+                    routes = self.result["routing"].get("pinned", [])
+                    if bad:
+                        res["serve"] = "fail: " + "; ".join(bad[:3])
+                    elif not routes:
+                        res["serve"] = "fail: no monokernel routing logged"
+                    else:
+                        res["serve"] = f"pass ({PINNED_REQUESTS} requests)"
+                finally:
+                    self.stop(p)
+        self.save()
 
     def tests(self):
         """The unit, kernel and timing tests of the installed PR."""
