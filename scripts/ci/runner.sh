@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # runner.sh -- the PR test's GitHub Actions runners on a Slurm login node.
 #
-# Each runner instance (rN) is pinned to one MI355X CI node (SLURM_NODELIST in
-# its .env) and takes one job at a time, so two runners keep the two dedicated
-# nodes busy and never put two jobs on one node. The runner does no GPU work: it
-# checks out the CI scripts and runs sbatch/squeue (slurm_launch.sh). Each instance is a systemd --user service; login-node
+# Each runner instance (rN) takes one job at a time, and slurm_launch.sh submits
+# it as a whole-node job to whichever of the two dedicated nodes is free, so two
+# runners keep both nodes busy and never put two jobs on one node. The runner
+# does no GPU work: it checks out the CI scripts and runs sbatch/squeue (slurm_launch.sh). Each instance is a systemd --user service; login-node
 # sessions are reaped at logout, so this needs `loginctl enable-linger`.
 #
-#   bash runner.sh install N NODE           download the runner into rN, pinned to NODE
+#   bash runner.sh install N                download the runner into rN and write its .env
 #                                           (needs SLURM_PARTITION, CI_NODE_SCRATCH and
 #                                           CI_MODEL_ROOT; see slurm_launch.sh)
 #   bash runner.sh register N [REPO_URL]    register rN (default https://github.com/sgl-project/sgl-amd-mono);
@@ -29,14 +29,13 @@ UNIT=sgl-amd-mono-runner
 LABELS=sgl-amd-mono-mi355x
 
 write_env() {
-  local dir=$1 node=$2
+  local dir=$1
   : "${SLURM_PARTITION:?}" "${CI_NODE_SCRATCH:?}" "${CI_MODEL_ROOT:?}"
   {
     echo "LANG=C.UTF-8"
     echo "SLURM_PARTITION=$SLURM_PARTITION"
     echo "SLURM_ACCOUNT=${SLURM_ACCOUNT:-$SLURM_PARTITION}"
     echo "SLURM_QOS=${SLURM_QOS:-$SLURM_PARTITION-qos}"
-    echo "SLURM_NODELIST=$node"
     echo "CI_NODE_SCRATCH=$CI_NODE_SCRATCH"
     echo "CI_MODEL_ROOT=$CI_MODEL_ROOT"
     echo "CI_SHARED_DIR=$HOME/.sgl_amd_mono_ci"
@@ -75,7 +74,7 @@ inst() { [[ "$1" =~ ^[0-9]+$ ]] || { echo "instance must be a number" >&2; exit 
 cmd=${1:-status}; shift || true
 case "$cmd" in
   install)
-    i=$(inst "${1:?instance}"); node=${2:?NODE}; d="$ROOT/$i"
+    i=$(inst "${1:?instance}"); d="$ROOT/$i"
     if [[ ! -x "$d/bin/Runner.Listener" ]]; then
       v=$(curl -sSI --max-time 30 https://github.com/actions/runner/releases/latest \
           | tr -d '\r' | awk -F/ 'tolower($1) ~ /^location:/ {print $NF}'); v=${v#v}
@@ -84,15 +83,14 @@ case "$cmd" in
       curl -sSfL --max-time 600 \
         "https://github.com/actions/runner/releases/download/v$v/actions-runner-linux-x64-$v.tar.gz" | tar xz -C "$d"
     fi
-    write_env "$d" "$node"; write_unit
-    echo "$i: runner $("$d/bin/Runner.Listener" --version) in $d, node $node" ;;
+    write_env "$d"; write_unit
+    echo "$i: runner $("$d/bin/Runner.Listener" --version) in $d" ;;
   register)
     i=$(inst "${1:?instance}"); url=${2:-https://github.com/sgl-project/sgl-amd-mono}; d="$ROOT/$i"
-    [[ -x "$d/config.sh" ]] || { echo "run: install ${1} NODE" >&2; exit 2; }
+    [[ -x "$d/config.sh" ]] || { echo "run: install ${1}" >&2; exit 2; }
     read -rs token; [[ -n "$token" ]] || { echo "no token on stdin" >&2; exit 2; }
-    node=$(sed -n 's/^SLURM_NODELIST=//p' "$d/.env")
     (cd "$d" && ./config.sh --unattended --replace --url "$url" --token "$token" \
-       --name "mono-ci-${node##*-}-$i" --labels "$LABELS" --work _work)
+       --name "mono-ci-$i" --labels "$LABELS" --work _work)
     systemctl --user enable --now "$UNIT@$i" ;;
   start|stop|restart)
     i=$(inst "${1:?instance}")
@@ -108,8 +106,8 @@ case "$cmd" in
     for d in "$ROOT"/r*; do
       [[ -d "$d" ]] || continue; i=$(basename "$d")
       reg=no; [[ -f "$d/.runner" ]] && reg=$(jq -r '"\(.agentName) -> \(.gitHubUrl)"' "$d/.runner" 2>/dev/null)
-      printf '%-4s node=%-22s registered=%-60s service=%s\n' "$i" \
-        "$(sed -n 's/^SLURM_NODELIST=//p' "$d/.env")" "$reg" "$(systemctl --user is-active "$UNIT@$i" 2>/dev/null)"
+      printf '%-4s registered=%-60s service=%s\n' "$i" \
+        "$reg" "$(systemctl --user is-active "$UNIT@$i" 2>/dev/null)"
     done ;;
   *) sed -n '2,22p' "$0"; exit 1 ;;
 esac

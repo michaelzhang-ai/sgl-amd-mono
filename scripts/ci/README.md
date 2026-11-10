@@ -103,10 +103,13 @@ and the reviewer verifies them. OCRBench and LiveCodeBench are not in the CI yet
 
 ## Infrastructure
 
-- Nodes: two MI355X nodes of a Slurm cluster, kept for this CI.
+- Nodes: two MI355X nodes of a Slurm cluster, kept for this CI. Other CI shares
+  their partition, so `slurm_launch.sh` keeps its jobs off the other nodes
+  (`SLURM_EXCLUDE`).
 - Runners: two, on the cluster's login node (`runner.sh`), label
-  `sgl-amd-mono-mi355x`, each pinned to one node. A runner takes one job at a time,
-  so the two nodes run two models at once and never two jobs on one node.
+  `sgl-amd-mono-mi355x`. A runner takes one job at a time and each job takes a
+  whole node, whichever of the two is free, so the two nodes run two models at
+  once and never two jobs on one node.
 - `slurm_launch.sh` (on the runner) submits `slurm_job.sh` as a whole-node job,
   streams its log and collects its results; `slurm_job.sh` (on the node) fetches
   the PR and base commits onto node-local disk, starts the SGLang ROCm container

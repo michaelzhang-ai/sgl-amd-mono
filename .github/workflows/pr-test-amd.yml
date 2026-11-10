@@ -149,7 +149,7 @@ jobs:
   test:
     needs: plan
     name: test (${{ matrix.model }}, ${{ matrix.tier }})
-    # Two runners on the cluster's login node, each pinned to one CI node.
+    # Two runners on the cluster's login node; each job takes one of the two CI nodes.
     runs-on: [self-hosted, sgl-amd-mono-mi355x]
     timeout-minutes: 1200
     strategy:

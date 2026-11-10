@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run one model's PR test as a whole-node Slurm job on this runner's CI node.
+# Run one model's PR test as a whole-node Slurm job on one of the CI's two nodes.
 #
 # The GitHub runner lives on the cluster's login node and does no GPU work. This
-# script submits slurm_job.sh to the node the runner is pinned to, streams the
+# script submits slurm_job.sh to whichever of the two nodes is free, streams the
 # job's log into the step output, unpacks the job's out/ into $CI_RESULTS, and
 # exits non-zero only when the job itself failed to run (the test outcome is in
 # result.json, which report.py judges). The job fetches the commits under test
@@ -12,7 +12,6 @@
 #
 # Runner environment (its .env):
 #   SLURM_PARTITION, SLURM_ACCOUNT, SLURM_QOS
-#   SLURM_NODELIST   the one node this runner submits to (two runners, two nodes)
 #   CI_NODE_SCRATCH  node-local directory for the checkouts, model mirror and cache
 #   CI_MODEL_ROOT    the checkpoints' root on shared storage (models.py's paths)
 # Job environment (the workflow): CI_IMAGE, CI_PR, CI_PR_SHA, CI_BASE_SHA, CI_RESULTS,
@@ -33,7 +32,6 @@ TIER="${2:-full}"
 : "${SLURM_PARTITION:?set in the runner environment}"
 : "${SLURM_ACCOUNT:?set in the runner environment}"
 : "${SLURM_QOS:?set in the runner environment}"
-: "${SLURM_NODELIST:?set in the runner environment}"
 : "${CI_NODE_SCRATCH:?set in the runner environment}"
 : "${CI_MODEL_ROOT:?set in the runner environment}"
 : "${CI_IMAGE:?}" "${CI_PR_SHA:?}" "${CI_BASE_SHA:?}"
@@ -44,6 +42,11 @@ if [[ ! "$TIME_LIMIT" =~ ^([0-9]+-)?[0-9]+:[0-9]{2}:[0-9]{2}$ ]]; then
     echo "ERROR: TIME_LIMIT must be HH:MM:SS or D-HH:MM:SS (got '$TIME_LIMIT')" >&2
     exit 2
 fi
+
+# The CI's two nodes are crsuse2-m2m-v3-060 and v3-123. The partition is shared
+# with SGLang's and Miles' CI, so keep the scheduler off its other nodes; with
+# --exclusive each job takes a whole node, whichever of the two is free.
+SLURM_EXCLUDE=crsuse2-m2m-v3-010,crsuse2-m2m-v3-022,crsuse2-m2m-v3-025,crsuse2-m2m-v3-090
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The workflow's cleanup step cancels by this name.
@@ -114,10 +117,10 @@ for attempt in $(seq 1 "$SUBMIT_ATTEMPTS"); do
     : > "$LOG"
     rm -f "$CI_EXIT_FILE"
     JOB_ID="$(sbatch --parsable -p "$SLURM_PARTITION" -A "$SLURM_ACCOUNT" -q "$SLURM_QOS" \
-        -N1 --exclusive --gres=gpu:8 -w "$SLURM_NODELIST" -t "$TIME_LIMIT" \
+        -N1 --exclusive --gres=gpu:8 --exclude="$SLURM_EXCLUDE" -t "$TIME_LIMIT" \
         -J "$JOB_NAME" --output "$LOG" "$CI_HARNESS/slurm_job.sh")"
     JOB_ID="${JOB_ID%%;*}"
-    echo "Submitted job $JOB_ID to $SLURM_NODELIST (attempt $attempt/$SUBMIT_ATTEMPTS): model=$MODEL tier=$TIER image=$CI_IMAGE"
+    echo "Submitted job $JOB_ID (attempt $attempt/$SUBMIT_ATTEMPTS): model=$MODEL tier=$TIER image=$CI_IMAGE"
 
     LOG_OFFSET=0
     misses=0
