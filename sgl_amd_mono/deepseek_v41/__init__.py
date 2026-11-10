@@ -36,3 +36,4 @@ HF_CONFIG = dict(
 )
 # a candidate source's (``candidate_source_layer_id``) top blocks, which K2i scores
 CANDIDATES = dict(candidate_topk_blocks=2048, candidate_block_size=8)
+# CI end-to-end trial (fork only; not for upstream)
