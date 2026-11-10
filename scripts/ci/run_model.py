@@ -393,14 +393,18 @@ class Run:
     def monokernel_off_ref_path(self, name):
         """The monokernel-off reference of benchmark ``name`` (or "perf") for this
         model and server recipe: the latest weekly run's off-side result. The
-        weekly run writes it, the PR test and the nightly read it. A trial run
-        (MONO_CI_NUM_EXAMPLES) keeps its own, so trial and real results never
-        mix."""
-        recipe = hashlib.sha256(json.dumps(self.recipe()).encode()).hexdigest()[:16]
-        root = Path(self.args.cache) / "monokernel_off_ref"
+        weekly run writes it, the PR test and the nightly read it. None on a trial
+        run (MONO_CI_NUM_EXAMPLES): its few examples neither read nor write it."""
         if NUM_EXAMPLES:
-            root = root / f"trial-n{NUM_EXAMPLES}"
-        return root / self.key / recipe / f"{name}.json"
+            return None
+        recipe = hashlib.sha256(json.dumps(self.recipe()).encode()).hexdigest()[:16]
+        return (
+            Path(self.args.cache)
+            / "monokernel_off_ref"
+            / self.key
+            / recipe
+            / f"{name}.json"
+        )
 
     def read_monokernel_off_ref(self, names, perf=False):
         """Load the monokernel-off reference of ``names`` (and, with ``perf``, of

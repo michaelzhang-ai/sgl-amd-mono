@@ -155,5 +155,4 @@ kernel and serving tests, timing scripts, accuracy benchmarks and concurrencies
 
 `MONO_CI_NUM_EXAMPLES` (examples a benchmark) and `MONO_CI_CONCURRENCY`
 (comma-separated) shorten a run of the CI itself. With `MONO_CI_NUM_EXAMPLES`,
-such a run keeps its own monokernel-off reference (`monokernel_off_ref/trial-nN/`),
-so trial and real results never mix.
+such a run neither reads nor writes the monokernel-off reference.
