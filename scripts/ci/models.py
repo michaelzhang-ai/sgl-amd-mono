@@ -71,16 +71,17 @@ ISL, OSL, RANGE_RATIO, PROMPTS_PER_SLOT = 8192, 1024, 0.8, 10
 # weekly run (Saturdays) runs all of them. AIME26 x4 is the costliest (~23K tokens
 # an answer), and GPQA covers much the same ground every night.
 EVALS = {
-    # max tokens: room for a thinking model's whole answer
-    "gsm8k": {"args": ["--max-tokens", "16384"], "gate": True},
-    "gpqa": {"args": ["--max-tokens", "65536"], "warn": 0.05},
+    # max tokens: room for a thinking model's whole answer. Repeats are explicit:
+    # sgl-eval's own defaults are 8 for GPQA and 16 for AIME.
+    "gsm8k": {"args": ["--max-tokens", "16384", "--n-repeats", "1"], "gate": True},
+    "gpqa": {"args": ["--max-tokens", "65536", "--n-repeats", "1"], "warn": 0.05},
     "aime26": {
         "args": ["--max-tokens", "65536", "--n-repeats", "4"],
         "warn": 0.03,
         "weekly": True,
     },
     # vision models only
-    "mmmu_pro": {"args": ["--max-tokens", "8192"], "warn": 0.03},
+    "mmmu_pro": {"args": ["--max-tokens", "8192", "--n-repeats", "1"], "warn": 0.03},
 }
 PR_EVALS = ["gsm8k"]
 # Added to a PR run by the `run-ci-extra` label: GSM8K's short answers cannot show

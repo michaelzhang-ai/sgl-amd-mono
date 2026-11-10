@@ -148,11 +148,14 @@ jobs:
       - name: Report
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # the models the run started: one without a result is reported, not dropped
+          MATRIX: ${{ needs.plan.outputs.matrix }}
         run: |
           mkdir -p results
           for d in artifacts/mono-ci-*; do [[ -d "$d" ]] && mv "$d" "results/${d#artifacts/mono-ci-}"; done
           rc=0
-          python3 harness/scripts/ci/report.py --nightly --results results \
+          expect="$(jq -r 'map(.model) | join(",")' <<< "$MATRIX")"
+          python3 harness/scripts/ci/report.py --nightly --results results --expect "$expect" \
             --title "AMD ${{ needs.plan.outputs.mode }} (main)" \
             --run-url "$RUN_URL" --out report.md > /dev/null || rc=$?
           cat report.md >> "$GITHUB_STEP_SUMMARY"

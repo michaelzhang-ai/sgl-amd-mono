@@ -279,7 +279,10 @@ class Run:
                 os.killpg(p.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        subprocess.run("pkill -9 -f sglang.launch_server; sleep 15", shell=True)
+        # no shell: `sh -c "pkill -f sglang.launch_server; ..."` matches and kills
+        # itself; the bracket keeps the pattern off pkill's own command line too
+        subprocess.run(["pkill", "-9", "-f", "sglang[.]launch_server"])
+        time.sleep(15)  # let the GPUs' memory drain before the next server
 
     def routing(self, side):
         """The startup lines that say which steps the launches serve."""
@@ -414,6 +417,10 @@ class Run:
         return found
 
     def write_off_cache(self, name, got):
+        # Only main's weekly run writes the reference: PR code runs in this
+        # container, and a PR run must not change what other PRs compare against.
+        if self.args.mode != "weekly":
+            return
         path = self.off_cache(name)
         if path and got and "error" not in got:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -485,7 +492,7 @@ class Run:
         why = self.model_ready() if self.key != "common" else None
         if a.mode in ("nightly", "weekly"):
             # first the sgl-amd-mono the image pins: what a user of this SGLang runs
-            self.pinned(serve=self.key != "common" and not why)
+            self.step("pinned", self.pinned, serve=self.key != "common" and not why)
         if self.key == "common":
             self.install(a.pr)
             self.pytest("unit", ["test/unit"], 1800)
@@ -496,20 +503,20 @@ class Run:
             self.skip_e2e(why)
         if a.mode in ("nightly", "weekly"):
             self.install(a.pr)
-            self.tests()
+            self.step("tests", self.tests)
             if not why:
                 evals = [
                     e
                     for e in self.m.get("evals", [])
                     if a.mode == "weekly" or not EVALS[e].get("weekly")
                 ]
-                self.side("on", True, evals=evals)
+                self.step("on", self.side, "on", True, evals=evals)
                 if a.mode == "weekly":
                     # the reference the nightly and the PR test read until next week
-                    self.side("off", False, evals=evals, fresh=True)
+                    self.step("off", self.side, "off", False, evals=evals, fresh=True)
                 else:
-                    self.read_off_cache(evals, perf=True)
-                self.e2e()
+                    self.step("off", self.read_off_cache, evals, perf=True)
+                self.step("e2e", self.e2e)
             return
 
         base_has_pkg = all(
@@ -527,19 +534,18 @@ class Run:
         if a.tier != "full":
             evals = []
         if base_has_pkg:
-            self.install(a.base)
-            self.microbench("base", a.base)
-            if not why:
-                self.side("base", True)
+            self.step("base", self.base_side, serve=not why)
         self.install(a.pr)
-        self.tests()
+        self.step("tests", self.tests)
         if not why:
-            self.side("on", True, evals=evals)
+            self.step("on", self.side, "on", True, evals=evals)
             # a new model's speed baseline is SGLang's own path
-            self.side("off", False, perf=not base_has_pkg, evals=evals)
+            self.step(
+                "off", self.side, "off", False, perf=not base_has_pkg, evals=evals
+            )
             if not base_has_pkg and "off" in self.result["perf"]:
                 self.result["perf"]["base"] = self.result["perf"].pop("off")
-            self.e2e()
+            self.step("e2e", self.e2e)
 
     def pinned(self, serve):
         """The nightly's first step: the image's own sgl-amd-mono, the commit this
@@ -607,6 +613,23 @@ class Run:
                 finally:
                     self.stop(p)
         self.save()
+
+    def base_side(self, serve):
+        """The base branch: its timing scripts and, with ``serve``, its speed test."""
+        self.install(self.args.base)
+        self.microbench("base", self.args.base)
+        if serve:
+            self.side("base", True)
+
+    def step(self, name, fn, *args, **kwargs):
+        """Run one step; an exception is recorded (the report fails on it) and the
+        steps after it still run."""
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:
+            self.result.setdefault("step_errors", {})[name] = f"{type(e).__name__}: {e}"
+            self.log(f"step {name} failed: {self.result['step_errors'][name]}")
+            self.save()
 
     def tests(self):
         """The unit, kernel and timing tests of the installed PR."""

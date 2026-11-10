@@ -89,8 +89,10 @@ case "$cmd" in
     i=$(inst "${1:?instance}"); url=${2:-https://github.com/sgl-project/sgl-amd-mono}; d="$ROOT/$i"
     [[ -x "$d/config.sh" ]] || { echo "run: install ${1}" >&2; exit 2; }
     read -rs token; [[ -n "$token" ]] || { echo "no token on stdin" >&2; exit 2; }
-    (cd "$d" && ./config.sh --unattended --replace --url "$url" --token "$token" \
-       --name "mono-ci-$i" --labels "$LABELS" --work _work)
+    # The token goes in the environment (config.sh reads ACTIONS_RUNNER_INPUT_<OPTION>),
+    # not on its command line, which any user can read in /proc.
+    (cd "$d" && ACTIONS_RUNNER_INPUT_TOKEN="$token" ./config.sh --unattended --replace \
+       --url "$url" --name "mono-ci-$i" --labels "$LABELS" --work _work)
     systemctl --user enable --now "$UNIT@$i" ;;
   start|stop|restart)
     i=$(inst "${1:?instance}")
@@ -100,7 +102,7 @@ case "$cmd" in
   unregister)
     i=$(inst "${1:?instance}"); d="$ROOT/$i"
     systemctl --user disable --now "$UNIT@$i" || true
-    read -rs token; (cd "$d" && ./config.sh remove --token "$token") ;;
+    read -rs token; (cd "$d" && ACTIONS_RUNNER_INPUT_TOKEN="$token" ./config.sh remove) ;;
   status)
     echo "host $(hostname -s), linger: $(loginctl show-user "$(id -un)" -p Linger --value)"
     for d in "$ROOT"/r*; do

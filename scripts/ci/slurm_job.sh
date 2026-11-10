@@ -32,8 +32,9 @@ echo "[mono-ci-job] start on $(hostname) job=$JOB_ID model=$CI_MODEL tier=${CI_T
 finish() {
     local rc=$?
     tar czf "$CI_RUN_DIR/out.tgz" -C "$WS/out" . 2>/dev/null || true
-    # the off-side results this job measured, back to shared storage (as this user)
-    [[ -d "$WS/off" ]] && cp -r --preserve=timestamps "$WS/off/." "$OFF_SHARED/" 2>/dev/null || true
+    # The off-side results main's weekly run measured, back to shared storage (as this
+    # user). A PR run never writes them: its code ran in the container.
+    [[ "${CI_MODE:-pr}" == weekly && -d "$WS/off" ]]         && cp -r --preserve=timestamps "$WS/off/." "$OFF_SHARED/" 2>/dev/null || true
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     # The container wrote as root; remove its files from inside one (never pulling).
     { docker image inspect "$CI_IMAGE" >/dev/null 2>&1 \
@@ -66,7 +67,8 @@ CHECKPOINT_SOURCES="${CHECKPOINT_SOURCES:-$HOME/.sgl_amd_mono_ci/checkpoint_sour
 mkdir -p "$MIRROR$CI_MODEL_ROOT"
 mirror() {
     local path=$1 dst="$MIRROR$1" src stamp
-    src="$(awk -v p="$path" '$1 == p {print $2; exit}' "$CHECKPOINT_SOURCES" 2>/dev/null)"
+    # (|| true: no sources file is fine, and a failed substitution would end the job under set -e)
+    src="$(awk -v p="$path" '$1 == p {print $2; exit}' "$CHECKPOINT_SOURCES" 2>/dev/null || true)"
     src="${src:-$path}"
     if [[ ! -d "$src" ]]; then
         # downloaded straight to the mirror, or not on the cluster

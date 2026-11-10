@@ -81,7 +81,10 @@ jobs:
           [[ "$(jq -r .state pr.json)" == open ]] || { echo "PR #$PR is not open"; exit 1; }
           pr_sha="${EVENT_SHA:-$(jq -r .head.sha pr.json)}"
           base_ref="$(jq -r .base.ref pr.json)"
-          base_sha="$(gh api "repos/$REPO/commits/$base_ref" --jq .sha)"
+          # The PR's merge-base, not the base branch's tip: the base side then holds
+          # exactly what the PR started from, and the comparison is the PR's own diff.
+          base_sha="$(gh api "repos/$REPO/compare/$base_ref...$pr_sha" --jq .merge_base_commit.sha 2>/dev/null || true)"
+          [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || base_sha="$(gh api "repos/$REPO/commits/$base_ref" --jq .sha)"
           jq -r .title pr.json > title.txt
           gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[]' | jq -s . > files.json
           {
@@ -201,7 +204,8 @@ jobs:
 
   report:
     needs: [plan, test]
-    if: always() && needs.plan.result == 'success'
+    # Not on a cancelled run: a newer run (a new label) has taken over the status.
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -230,7 +234,13 @@ jobs:
           for d in artifacts/mono-ci-*; do [[ -d "$d" ]] && mv "$d" "results/${d#artifacts/mono-ci-}"; done
           rc=0
           python3 harness/scripts/ci/report.py --scope artifacts/scope/scope.json --results results \
-            --run-url "$RUN_URL" --out report.md > /dev/null || rc=$?
+            --run-url "$RUN_URL" --out report.md > report.log 2>&1 || rc=$?
+          # A crash of report.py itself must still end the pending status.
+          if [[ ! -s report.md ]]; then
+            rc=1
+            { echo "<!-- sgl-amd-mono-ci -->"; echo "## AMD PR test: ❌ the report failed"; echo
+              echo "See the [run]($RUN_URL)."; echo; echo '```'; tail -n 30 report.log; echo '```'; } > report.md
+          fi
           cat report.md >> "$GITHUB_STEP_SUMMARY"
           # GitHub caps a comment at 65536 characters; cut on a character boundary.
           # (iconv -c drops a split character but still exits 1, which bash -e would stop on)

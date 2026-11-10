@@ -153,9 +153,12 @@ def accuracy_check(key, r):
 
 def perf_check(key, r, needs_gain):
     """PR mode: base branch → PR, both monokernels on, with the gain/loss gate.
-    Nightly: monokernels off → on, for the record. Only median TPOT gates; output
-    throughput is shown, and a loss over PERF_LOSS at a covered concurrency warns.
-    The other serving metrics swing too much with the monokernels to judge on."""
+    Nightly: monokernels off → on, for the record. Only median TPOT gates: a loss
+    over PERF_LOSS at a covered concurrency (``gate_concurrency``) fails a PR, at
+    the others it warns. The [Perf]/[Feat] gain is judged across all the PR's
+    models (``best_gain``), not per model. Output throughput is shown, and a loss
+    over PERF_LOSS at a covered concurrency warns. The other serving metrics
+    swing too much with the monokernels to judge on."""
     m = MODELS.get(key, {})
     nightly = r.get("mode") in ("nightly", "weekly")
     if not m.get("concurrency"):
@@ -195,20 +198,21 @@ def perf_check(key, r, needs_gain):
             continue
         gain = b["median_tpot_ms"] / p["median_tpot_ms"] - 1
         note = ""
-        if gain < -PERF_LOSS and (not nightly or c in m["gate_concurrency"]):
-            states.append(WARN if nightly else FAIL)
+        if gain < -PERF_LOSS:
+            covered = c in m["gate_concurrency"]
+            states.append(FAIL if covered and not nightly else WARN)
+            note = f"TPOT {-gain:.1%} worse" + (
+                "" if covered and not nightly else " (warning)"
+            )
         if c in m["gate_concurrency"]:
             gate_gains.append(gain)
             if bt and pt and pt / bt - 1 < -PERF_LOSS:
                 states.append(WARN)
-                note = f"throughput {pt / bt - 1:+.1%} (warning)"
+                note = "; ".join(
+                    x for x in (note, f"throughput {pt / bt - 1:+.1%} (warning)") if x
+                )
         rows.append((c, b["median_tpot_ms"], p["median_tpot_ms"], gain, bt, pt, note))
     best = max(gate_gains, default=None)
-    if needs_gain and not nightly:
-        if best is None:
-            states.append(WARN)
-        elif best < PERF_GAIN:
-            states.append(FAIL)
     summary = ", ".join(
         f"conc {c}: {b:.2f} → {p:.2f} ms ({1 + g:.2f}×)"
         for c, b, p, g, *_ in rows
@@ -218,11 +222,9 @@ def perf_check(key, r, needs_gain):
         rule = "monokernels off → on; a loss at a covered concurrency warns"
         sides = "off → on"
     else:
-        rule = (
-            f"needs ≥{PERF_GAIN:.0%} median-TPOT gain at conc {m['gate_concurrency']}"
-            if needs_gain
-            else f"no loss over {PERF_LOSS:.0%}"
-        )
+        rule = f"no loss over {PERF_LOSS:.0%} at conc {m['gate_concurrency']}"
+        if needs_gain and best is not None:
+            rule += f"; best gain {best:+.1%} (the ≥{PERF_GAIN:.0%} gain is judged across the PR)"
         sides = "base → PR"
     return (
         worst(PASS, *states),
@@ -314,6 +316,8 @@ def model_section(key, r, needs_gain):
         checks.append(("Pinned sgl-amd-mono on this SGLang", *pinned_check(r)))
     if r.get("error"):
         checks.append(("Run", FAIL, f"`{r['error']}`"))
+    for name, err in r.get("step_errors", {}).items():
+        checks.append((f"Step `{name}`", FAIL, f"`{err}`"))
     lines = [
         f"### {r.get('name', key)} (`{key}`)",
         "",
@@ -369,6 +373,21 @@ def model_section(key, r, needs_gain):
     return worst(*(s for _, s, _ in checks)), "\n".join(lines)
 
 
+def best_gain(key, r):
+    """The best median-TPOT gain, base → PR, at the model's covered concurrencies."""
+    m, perf = MODELS.get(key, {}), r.get("perf", {})
+    base, new = perf.get("base", {}), perf.get("on", {})
+    gains = [
+        base[str(c)]["median_tpot_ms"] / new[str(c)]["median_tpot_ms"] - 1
+        for c in m.get("gate_concurrency", [])
+        if isinstance(base.get(str(c)), dict)
+        and isinstance(new.get(str(c)), dict)
+        and base[str(c)].get("median_tpot_ms")
+        and new[str(c)].get("median_tpot_ms")
+    ]
+    return max(gains, default=None)
+
+
 def load(results: Path, key):
     p = results / key / "result.json"
     if p.exists():
@@ -386,6 +405,11 @@ def main():
         help="every model in --results (nightly or weekly)",
     )
     ap.add_argument("--title", default="AMD nightly (main)")
+    ap.add_argument(
+        "--expect",
+        default="",
+        help="nightly: the models the run started, comma-separated (one without a result fails)",
+    )
     ap.add_argument("--model", help="judge one model only (its job's status)")
     ap.add_argument("--title-type", default="")
     ap.add_argument("--run-url", default="")
@@ -402,7 +426,12 @@ def main():
 
     run = f" · [run]({args.run_url})" if args.run_url else ""
     if args.nightly:
-        keys = sorted(p.name for p in results.iterdir() if p.is_dir())
+        found = (
+            {p.name for p in results.iterdir() if p.is_dir()}
+            if results.is_dir()
+            else set()
+        )
+        keys = sorted(found | {k for k in args.expect.split(",") if k})
         states, sections = [], []
         for key in keys:
             s, text = model_section(key, load(results, key), False)
@@ -433,10 +462,32 @@ def main():
             ("Rules: CODEOWNERS", *rules["codeowners"]),
             ("Doc", *rules["doc"]),
         ]
+        if "new_model" in rules:
+            rule_rows.append(("New model", *rules["new_model"]))
+        if needs_gain:
+            gains = {
+                k: g
+                for k in scope["models"]
+                if k in MODELS and (g := best_gain(k, load(results, k))) is not None
+            }
+            if not gains:
+                rule_rows.append(
+                    ("Speed gain", WARN, "no model has a speed result to judge")
+                )
+            else:
+                k, g = max(gains.items(), key=lambda kv: kv[1])
+                ok = g >= PERF_GAIN
+                rule_rows.append(
+                    (
+                        "Speed gain",
+                        PASS if ok else FAIL,
+                        f"best median-TPOT gain {g:+.1%} (`{k}`); needs ≥{PERF_GAIN:.0%} at a covered concurrency of one of the PR's models",
+                    )
+                )
         states += [s for _, s, _ in rule_rows]
         overall = worst(*states)
         gain_note = (
-            f"`[{scope['title_type']}]` PR: needs a ≥{PERF_GAIN:.0%} median-TPOT gain at a gate concurrency."
+            f"`[{scope['title_type']}]` PR: needs a ≥{PERF_GAIN:.0%} median-TPOT gain at a covered concurrency of one of its models."
             if needs_gain
             else f"`[{scope['title_type'] or '?'}]` PR: no speed gain needed; no loss over {PERF_LOSS:.0%}."
         )

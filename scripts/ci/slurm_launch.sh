@@ -134,7 +134,8 @@ for attempt in $(seq 1 "$SUBMIT_ATTEMPTS"); do
         case "${state:-}" in
             PENDING)
                 misses=0
-                if [[ "${reason:-}" == JobHold* ]]; then
+                # Slurm: JobHeldUser / JobHeldAdmin; Spur: JobHoldMaxRequeue
+                if [[ "${reason:-}" == JobHold* || "${reason:-}" == JobHeld* ]]; then
                     echo "Job $JOB_ID held ($reason) before starting; cancelling"
                     scancel "$JOB_ID" 2>/dev/null || true
                     break

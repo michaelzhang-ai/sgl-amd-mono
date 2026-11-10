@@ -105,6 +105,31 @@ def doc_rule(files, pr_dir: Path):
     return "pass", f"README.md in sgl_amd_mono/{{{','.join(pkgs)}}}"
 
 
+def new_model_rule(files):
+    """A model package no entry in the base branch's models.py covers: the CI cannot
+    run it in this PR (its scripts and models.py come from the base branch), only
+    from the next PR after its entry merges."""
+    known = {p for m in MODELS.values() for p in m["packages"]} | {"common"}
+    new = sorted(
+        {
+            Path(f["filename"]).parts[1]
+            for f in files
+            if f["filename"].startswith("sgl_amd_mono/")
+            and len(Path(f["filename"]).parts) > 2
+            and f.get("status") != "removed"
+        }
+        - known
+    )
+    if not new:
+        return "pass", "every changed model package is in the CI"
+    return (
+        "warn",
+        f"not in the CI yet: sgl_amd_mono/{{{','.join(new)}}}. Add its entry to "
+        "scripts/ci/models.py; it runs from the PR after that entry merges, so give "
+        "this PR's accuracy and speed results by hand",
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--files", required=True)
@@ -133,6 +158,7 @@ def main():
         "rules": {
             "codeowners": codeowners_rule(files),
             "doc": doc_rule(files, Path(args.pr_dir)),
+            "new_model": new_model_rule(files),
         },
         "files": len(files),
     }
