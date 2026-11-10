@@ -50,7 +50,8 @@ these sides:
 - **off**: the same build, monokernels off (SGLang's own path). It does not
   depend on the package, so the latest result for the model's recipe is cached:
   the weekly run refreshes it, the PR test runs it only when the cache is empty,
-  and the nightly does not run it.
+  and the nightly does not run it. The cache is on shared storage
+  (`$CI_SHARED_DIR/off-cache`), since a job can land on either node.
 
 | Check | PR test, full tier | PR test, smoke tier | Nightly | Weekly |
 | --- | --- | --- | --- | --- |
@@ -112,7 +113,10 @@ and the reviewer verifies them. OCRBench and LiveCodeBench are not in the CI yet
 
 - Nodes: two MI355X nodes of a Slurm cluster, kept for this CI. Other CI shares
   their partition, so `slurm_launch.sh` keeps its jobs off the other nodes
-  (`SLURM_EXCLUDE`).
+  (`SLURM_EXCLUDE` in `slurm_launch.sh`, so every change to it is reviewed here).
+  A node added to the partition later is not excluded until it is added to that
+  list; a node feature or reservation for the CI's two nodes would remove that
+  step.
 - Runners: two, on the cluster's login node (`runner.sh`), label
   `sgl-amd-mono-mi355x`. A runner takes one job at a time and each job takes a
   whole node, whichever of the two is free, so the two nodes run two models at
