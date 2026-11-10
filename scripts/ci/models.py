@@ -86,12 +86,12 @@ EVALS = {
 PR_EVALS = ["gsm8k"]
 # Added to a PR run by the `run-ci-extra` label: GSM8K's short answers cannot show
 # a loss at long context, GPQA's long ones can. It gates like GSM8K (paired against
-# the latest weekly off result) in a PR run, and only warns in the nightly.
+# the monokernel-off reference) in a PR run, and only warns in the nightly.
 EXTRA_EVALS = ["gpqa"]
 # The nightly runs no off side. It holds each on score to the model's fixed
 # ``baseline`` ({benchmark: minimum score}): below it fails for GSM8K and warns
-# for the rest. A benchmark without one is compared with the latest weekly off
-# result instead. Each weekly report suggests baselines (the off score less the
+# for the rest. A benchmark without one is compared with the monokernel-off
+# reference (the latest weekly run's off result) instead. Each weekly report suggests baselines (the off score less the
 # benchmark's margin, ``BASELINE_MARGIN``) to copy into the model's entry.
 BASELINE_MARGIN = {"gsm8k": 0.015, "gpqa": 0.05, "aime26": 0.03, "mmmu_pro": 0.03}
 TEXT_EVALS = ["gsm8k", "gpqa", "aime26"]

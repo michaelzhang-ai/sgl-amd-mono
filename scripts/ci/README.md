@@ -48,17 +48,22 @@ these sides:
 - **base**: the base branch, monokernels on (PR test only);
 - **on**: the PR (main in the nightly), monokernels on;
 - **off**: the same build, monokernels off (SGLang's own path). It does not
-  depend on the package, so the latest result for the model's recipe is cached:
-  the weekly run refreshes it, the PR test runs it only when the cache is empty,
-  and the nightly does not run it. The cache is on shared storage
-  (`$CI_SHARED_DIR/off-cache`), since a job can land on either node.
+  depend on the package, so the weekly run's off result for the model's recipe is
+  kept as the **monokernel-off reference** (`monokernel_off_ref`): the PR test and
+  the nightly compare their on scores against it until the next weekly run. The PR
+  test runs the off side itself only when the reference has no entry yet, and
+  never writes the reference; the nightly does not run it. The reference is on
+  shared storage (`$CI_SHARED_DIR/monokernel_off_ref`), since a job can land on
+  either node, and the container mounts it directly: writable in the weekly run
+  only, read-only in the PR test and the nightly. The weekly run hands the files
+  it writes to the directory's owner (the runner account).
 
 | Check | PR test, full tier | PR test, smoke tier | Nightly | Weekly |
 | --- | --- | --- | --- | --- |
 | Tests | unit, the model's kernel tests and serving tests (`test/e2e`) | same | same | same |
 | Kernel microbenchmark | the model's timing scripts, base and PR | same | main | main |
 | Accuracy | sgl-eval GSM8K (1319 questions), on and off; GPQA too with `run-ci-extra` | the serving tests' GSM8K and KL bounds | GSM8K, GPQA Diamond (and MMMU-Pro for vision models), on | the nightly's and AIME26 x4, on and off |
-| E2E performance | InferenceX fixed length at the model's concurrencies, base and on | the gate concurrencies only | on (against the weekly off) | off and on |
+| E2E performance | InferenceX fixed length at the model's concurrencies, base and on | the gate concurrencies only | on (against the monokernel-off reference) | off and on |
 | Scope | the server's startup lines that say which steps the launches serve | same | same | same |
 
 E2E performance is `sglang.benchmark.serving`: random 8k in / 1k out, range
@@ -95,9 +100,9 @@ field added to an op, fails that check the day the image picks it up.
 
 The nightly fails the same way on tests. It holds each on score to the model's
 `baseline` in `models.py`: GSM8K below it fails, the other benchmarks warn. A
-benchmark without a baseline is compared with the latest weekly off result
-instead. Each weekly report suggests baselines (the off score less the
-benchmark's margin) to copy into `models.py`. The weekly run gates on GSM8K's on
+benchmark without a baseline is compared with the monokernel-off reference (the
+latest weekly off result) instead. Each weekly report suggests baselines (the off
+score less the benchmark's margin) to copy into `models.py`. The weekly run gates on GSM8K's on
 and off test like the PR test; GPQA, AIME26 and MMMU-Pro have too few questions
 to gate on, so a score more than its `warn` margin below the off run's is a
 warning, as is a slowdown with the monokernels on.
@@ -149,5 +154,6 @@ kernel and serving tests, timing scripts, accuracy benchmarks and concurrencies
 ## Trial runs
 
 `MONO_CI_NUM_EXAMPLES` (examples a benchmark) and `MONO_CI_CONCURRENCY`
-(comma-separated) shorten a run of the CI itself; such a run does not touch the
-accuracy cache.
+(comma-separated) shorten a run of the CI itself. With `MONO_CI_NUM_EXAMPLES`,
+such a run keeps its own monokernel-off reference (`monokernel_off_ref/trial-nN/`),
+so trial and real results never mix.

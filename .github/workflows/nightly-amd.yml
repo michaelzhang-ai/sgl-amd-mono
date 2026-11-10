@@ -5,8 +5,8 @@ name: Nightly (AMD)
 # Sunday to Friday, the nightly runs the monokernels on only, skips the `weekly`
 # benchmarks (AIME26 x4) and holds the scores to each model's fixed `baseline`.
 # Saturday's weekly run has every benchmark with the monokernels on and off; its
-# off results are the reference the nightly and the PR test read until the next
-# one. See scripts/ci/README.md.
+# off results become the monokernel-off reference (monokernel_off_ref) the nightly
+# and the PR test read until the next one. See scripts/ci/README.md.
 
 on:
   schedule:

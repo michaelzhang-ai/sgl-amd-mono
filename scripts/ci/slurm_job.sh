@@ -23,25 +23,20 @@ NAME="sgl-amd-mono-ci-$JOB_ID"
 # The CI's HF token (read access to gated datasets such as GPQA), if the runner
 # account has one. Used once, before any PR code runs, to fill the dataset cache.
 HF_TOKEN_FILE="${HF_TOKEN_FILE:-$HOME/.sgl_amd_mono_ci/hf_token}"
-# The off-side results run_model.py caches (/cache/off), on shared storage: the
-# weekly run that writes them and the jobs that read them can land on either node.
-OFF_SHARED="${CI_SHARED_DIR:-$HOME/.sgl_amd_mono_ci}/off-cache"
+# The monokernel-off reference: the weekly run's off-side results that the PR test
+# and the nightly compare against (run_model.py, /cache/monokernel_off_ref). On
+# shared storage, since the weekly run that writes it and the jobs that read it can
+# land on either node. The container mounts it directly (the shared home does not
+# squash root): writable in main's weekly run only, read-only wherever PR code runs.
+MONOKERNEL_OFF_REF_SHARED="${CI_SHARED_DIR:-$HOME/.sgl_amd_mono_ci}/monokernel_off_ref"
+MONOKERNEL_OFF_REF_MOUNT=ro
+[[ "${CI_MODE:-pr}" == weekly ]] && MONOKERNEL_OFF_REF_MOUNT=rw
 
 echo "[mono-ci-job] start on $(hostname) job=$JOB_ID model=$CI_MODEL tier=${CI_TIER:-full} image=$CI_IMAGE $(date -u +%FT%TZ)"
 
 finish() {
     local rc=$?
     tar czf "$CI_RUN_DIR/out.tgz" -C "$WS/out" . 2>/dev/null || true
-    # The off-side results main's weekly run measured, back to shared storage (as this
-    # user). A PR run never writes them: its code ran in the container. Only this
-    # model's files go back (the other model of a weekly run may have written fresher
-    # ones since this job's copy), each to a temporary name and then renamed.
-    if [[ "${CI_MODE:-pr}" == weekly ]]; then
-        find "$WS/off" -type d -name "$CI_MODEL" -prune 2>/dev/null | while read -r d; do
-            rel="${d#"$WS/off/"}"
-            mkdir -p "$OFF_SHARED/$rel" && rsync -rt --delay-updates "$d/" "$OFF_SHARED/$rel/" 2>/dev/null || true
-        done
-    fi
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     # The container wrote as root; remove its files from inside one (never pulling).
     { docker image inspect "$CI_IMAGE" >/dev/null 2>&1 \
@@ -108,10 +103,7 @@ done
 checkout "$WS/pr" "$CI_PR_SHA"
 checkout "$WS/base" "$CI_BASE_SHA"
 
-# A per-job copy of the shared off-side cache: the container's root cannot write
-# the shared home (root squash), so finish() copies what it adds back as this user.
-mkdir -p "$OFF_SHARED" "$WS/off"
-cp -r --preserve=timestamps "$OFF_SHARED/." "$WS/off/" 2>/dev/null || true
+mkdir -p "$MONOKERNEL_OFF_REF_SHARED"
 
 # This CI's containers from an earlier job that did not clean up. The node is
 # held whole, so nothing else of ours runs here.
@@ -133,7 +125,7 @@ docker run -d --name "$NAME" \
     --device /dev/kfd --device /dev/dri --group-add video \
     --cap-add SYS_PTRACE --security-opt seccomp=unconfined \
     --shm-size 64g --ulimit memlock=-1 --ulimit stack=67108864 \
-    -v "$WS:/ci" -v "$CACHE:/cache" -v "$WS/off:/cache/off" \
+    -v "$WS:/ci" -v "$CACHE:/cache" -v "$MONOKERNEL_OFF_REF_SHARED:/cache/monokernel_off_ref:$MONOKERNEL_OFF_REF_MOUNT" \
     -v "$MIRROR$CI_MODEL_ROOT:$CI_MODEL_ROOT:ro" \
     -e HF_HOME=/cache/hf -e PIP_CACHE_DIR=/cache/pip \
     -e CI_MODEL_ROOT="$CI_MODEL_ROOT" -e CI_IMAGE="$CI_IMAGE" -e CI_PR_SHA="$CI_PR_SHA" -e CI_BASE_SHA="$CI_BASE_SHA" \
